@@ -1,6 +1,8 @@
 build/
+iso/
 *.o
-*.bin
+*.efi
+*.elf
+*.img
 *.iso
 *.tar.gz
-*ZONE.indefitier

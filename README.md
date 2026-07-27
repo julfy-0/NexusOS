@@ -1,109 +1,62 @@
 # NexusOS
 
-Самостоятельная 32-битная x86 операционная система, написанная с нуля на C
-(с минимальными вставками ассемблера там, где без этого не обойтись —
-загрузочный стаб и переключение контекста прерываний).
+Самостоятельная 64-битная ОС для x86_64, написанная с нуля на C, со
+своим UEFI-загрузчиком (без GRUB). Монолитное ядро (long mode), свой
+GDT/IDT/PIC/PIT, PS/2-клавиатура, консоль на framebuffer, диск через
+AHCI+FAT32, встроенный шелл с ~50 командами.
 
-Проект использует классическую и «профессиональную» для OS-разработки схему:
-GRUB2 (Multiboot) в роли загрузчика, кросс-компилятор `i686-elf-gcc`,
-freestanding-ядро без зависимости от libc хоста.
+Собирается **обычным host `gcc`/`ld`** — если ты на x86_64 Linux,
+отдельный кросс-компилятор не нужен.
+
+> Версия 0.3.0-refit — архитектурный пивот с прежней BIOS/i386/GRUB
+> версии на UEFI/x86_64. История и причина — `docs/adr/0002-uefi-x86_64-pivot.md`.
 
 ## Структура проекта
 
 ```
 NexusOS/
-├── Makefile                 # Главный сборочный файл (собирает всё через under-Makefiles)
-├── config/
-│   └── grub.cfg             # Конфиг GRUB для ISO-образа
-├── toolchain/
-│   └── build-cross-compiler.sh   # Скрипт сборки кросс-компилятора i686-elf-gcc
-├── scripts/
-│   ├── make-iso.sh          # Сборка загрузочного .iso через grub-mkrescue
-│   └── run-qemu.sh          # Запуск ядра в QEMU
-├── boot/
-│   └── boot.S               # Multiboot-заголовок и точка входа (asm -> kernel_main)
-├── arch/i386/                # Всё, что специфично для платформы i386
-│   ├── linker.ld            # Скрипт линковщика (карта памяти ядра)
-│   ├── gdt.c / gdt.h         # Global Descriptor Table
-│   ├── idt.c / idt.h         # Interrupt Descriptor Table
-│   ├── isr.S / isr.c / isr.h # Обработчики исключений CPU (0-31)
-│   ├── irq.c / irq.h         # PIC, аппаратные прерывания (IRQ0-15)
-│   └── io.h                  # inb/outb и другие порт-инструкции
+├── Makefile
+├── OVMF_VARS.fd              # NVRAM-переменные UEFI-прошивки для QEMU
+├── boot/efi/                 # UEFI-загрузчик (PE32+, свой ELF64-парсер, без GRUB)
+├── arch/x86_64/               # entry point, GDT, IDT, ISR, linker script, io.h
 ├── kernel/
-│   ├── kernel.c / kernel.h  # kernel_main — точка входа ядра на C
-│   └── panic.c / panic.h    # Аварийная остановка системы
+│   ├── kernel.c / kstate.h    # kmain, глобальный доступ к boot_info
+│   └── shell/                 # встроенный шелл + apps/ (~50 команд: ls, cat,
+│                               #   grep, calc, neofetch, reboot, diskls, ...)
 ├── drivers/
-│   ├── vga/                 # Текстовый VGA-драйвер (0xB8000)
-│   ├── serial/               # UART/COM1 — для debug-вывода
-│   ├── keyboard/              # PS/2-клавиатура (IRQ1)
-│   └── timer/                # PIT-таймер (IRQ0)
-├── mm/
-│   └── pmm.c / pmm.h        # Физический менеджер памяти (bitmap-allocator)
-├── lib/
-│   ├── string.c / string.h  # Freestanding-реализация memset/memcpy/strlen...
-│   └── stdio.c / stdio.h    # kprintf — минимальный printf для ядра
-├── include/nexus/
-│   └── types.h              # Общие типы (uintN_t уже из <stdint.h>, плюс свои)
+│   ├── console/                # framebuffer + битмап-шрифт 8x16
+│   ├── cpu/                    # CPUID (vendor/brand/логические ядра)
+│   ├── keyboard/                # PS/2, полная инициализация i8042
+│   ├── pic/                     # 8259 remap + EOI
+│   ├── timer/                   # PIT (IRQ0)
+│   └── storage/                 # PCI enumeration, AHCI (SATA)
+├── fs/                        # FAT32 (монтирование, чтение)
+├── lib/mem.c                  # freestanding memcpy/memset/strlen/...
+├── include/nexus/boot_info.h  # контракт bootloader ↔ kernel
+├── userdata/                  # заготовки под пользовательские данные
 └── docs/
-    ├── STATUS.md             # ЧИТАТЬ ПЕРВЫМ — текущее состояние проекта
-    ├── AI_HANDOFF.md         # Правила для любой нейронки/человека, продолжающего проект
-    ├── ROADMAP.md            # Путь развития по milestone'ам
-    ├── VERSIONING.md         # Наша схема версий (не SemVer)
-    ├── adr/                  # Architecture Decision Records — почему решили именно так
-    ├── ARCHITECTURE.md       # Описание архитектуры системы
-    └── BUILDING.md           # Подробная инструкция по сборке и запуску
+    ├── STATUS.md              # ЧИТАТЬ ПЕРВЫМ — текущее состояние
+    ├── AI_HANDOFF.md          # правила для продолжающего (человек или AI)
+    ├── ROADMAP.md             # путь развития по milestone'ам
+    ├── VERSIONING.md          # наша схема версий
+    ├── MIGRATION_0002.md      # таблица старые-пути → новые-пути (пивот)
+    ├── adr/                   # архитектурные решения и почему
+    ├── ARCHITECTURE.md        # поток загрузки, прерывания, память
+    └── BUILDING.md            # как собрать и запустить
 ```
-
-## Продолжаешь с другой нейронкой или через месяц?
-
-Начни с `docs/STATUS.md` — там текущая версия, что готово, что дальше.
-Потом `docs/AI_HANDOFF.md` — как вносить изменения, не разваливая
-процесс. `docs/ROADMAP.md` — куда идём по шагам, `CHANGELOG.md` — что
-уже сделано. Вся эта система придумана специально, чтобы не зависеть
-от памяти конкретной AI-сессии.
 
 ## Быстрый старт
 
-Готовое окружение для OS-разработки нужно один раз собрать (кросс-компилятор
-`i686-elf-gcc` + `binutils`, GRUB, QEMU). В песочнице, где мы работаем сейчас,
-сети нет, поэтому собрать/прогнать ISO прямо тут нельзя — но весь код готов
-к сборке на твоей машине:
-
 ```bash
-# 1. Собираем кросс-компилятор (один раз, займёт 10-20 минут)
-./toolchain/build-cross-compiler.sh
-
-# 2. Добавляем его в PATH (или впиши в ~/.bashrc)
-export PATH="$HOME/opt/cross/bin:$PATH"
-
-# 3. Собираем ядро и .iso
-make iso
-
-# 4. Запускаем в QEMU
-make run
+make            # build/BOOTX64.EFI + build/kernel.elf
+make run        # + образ диска, запуск в QEMU (нужны qemu-system-x86_64,
+                #   ovmf, dosfstools, mtools — apt install, без сборки toolchain)
 ```
 
-Подробности — в `docs/BUILDING.md`.
+Подробности, известные проблемы и как их лечить — `docs/BUILDING.md`.
 
-## Что уже реализовано
+## Продолжаешь с другой нейронкой или через месяц?
 
-- Multiboot-совместимая загрузка через GRUB2
-- GDT (плоская модель памяти, kernel code/data segments)
-- IDT + обработчики всех 32 исключений CPU
-- PIC remap + обработка IRQ (таймер IRQ0, клавиатура IRQ1)
-- VGA text-mode драйвер (80x25, скроллинг, цвета)
-- Серийный порт (COM1) для лог-вывода, независимого от VGA
-- `kprintf` — упрощённый printf для ядра (%d %u %x %s %c %%)
-- Простейший physical memory manager (bitmap) на основе Multiboot memory map
-- Паника ядра с остановкой CPU (`panic()`)
-
-## Что дальше (не реализовано, но структура готова к расширению)
-
-- Виртуальная память / paging (`mm/`)
-- Планировщик процессов, переключение задач
-- Файловая система, драйвер диска (ATA/AHCI)
-- Системные вызовы и переход в user-mode (ring 3)
-
-Каждый следующий шаг добавляется как новый модуль в соответствующую папку
-без переделки уже существующей структуры — в этом и смысл разбивки по
-`arch/`, `drivers/`, `mm/`, `kernel/`.
+Начни с `docs/STATUS.md`. Эта система (STATUS/ROADMAP/ADR/AI_HANDOFF)
+придумана специально, чтобы не зависеть от памяти конкретной AI-сессии
+— читай `docs/AI_HANDOFF.md` перед тем, как вносить изменения.

@@ -1,84 +1,118 @@
-/*
- * NexusOS — kernel.c
- * Точка входа ядра на C. Сюда прыгает boot/boot.S сразу после того,
- * как настроен стек. Отсюда по порядку инициализируются все
- * подсистемы: GDT -> IDT/ISR/IRQ -> драйверы -> память -> "shell".
- */
-#include "kernel.h"
-#include "panic.h"
+/* NexusOS kernel — kmain.
+ *
+ * На входе: boot services уже мертвы, framebuffer доступен напрямую,
+ * paging — тот, что оставила прошивка (identity-map). Своя MMU-настройка —
+ * следующий милстоун. */
+#include <stdint.h>
+#include "boot_info.h"
+#include "console.h"
+#include "gdt.h"
+#include "idt.h"
+#include "pic.h"
+#include "kstate.h"
+#include "shell.h"
+#include "pit.h"
+#include "pci.h"
+#include "ahci.h"
+#include "fat32.h"
+#include "keyboard.h"
 
-#include <arch/i386/gdt.h>
-#include <arch/i386/idt.h>
-#include <arch/i386/isr.h>
-#include <arch/i386/irq.h>
+static void print_banner(nexus_boot_info_t *bi) {
+    console_set_color(COLOR_GREEN, COLOR_BLACK);
+    console_print("NexusOS\n");
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
+    console_print("========\n\n");
 
-#include <drivers/vga/vga.h>
-#include <drivers/serial/serial.h>
-#include <drivers/keyboard/keyboard.h>
-#include <drivers/timer/timer.h>
+    console_print("Kernel is alive.\n\n");
 
-#include <mm/pmm.h>
-#include <lib/stdio.h>
+    console_print("Framebuffer: ");
+    console_print_dec(bi->fb.width);
+    console_print(" x ");
+    console_print_dec(bi->fb.height);
+    console_print(" @ ");
+    console_print_hex(bi->fb.base);
+    console_print("\n");
 
-#include <nexus/multiboot.h>
+    console_print("Memory map: ");
+    console_print_dec(bi->mmap.map_size / bi->mmap.descriptor_size);
+    console_print(" entries, ");
+    console_print_dec(bi->mmap.map_size);
+    console_print(" bytes total\n\n");
 
-#define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
-
-/* Определены в arch/i386/linker.ld — адреса конца ядра в памяти */
-extern u32 kernel_end;
-
-static void print_banner(void) {
-    vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
-    kprintf("=========================================\n");
-    kprintf(" %s v%s -- freestanding x86 kernel\n", NEXUSOS_NAME, NEXUSOS_VERSION);
-    kprintf("=========================================\n");
-    vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+    console_set_color(COLOR_CYAN, COLOR_BLACK);
+    console_print("GDT ... ");
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
 }
 
-void kernel_main(u32 magic, u32 mbi_addr) {
-    vga_init();
-    serial_init();
+void kmain(nexus_boot_info_t *boot_info) {
+    console_init(&boot_info->fb);
 
-    print_banner();
-
-    if (magic != MULTIBOOT_BOOTLOADER_MAGIC) {
-        panic("Invalid Multiboot magic number — загрузчик не GRUB/Multiboot");
+    if (boot_info->magic != NEXUS_BOOT_MAGIC) {
+        /* Даже без валидного boot_info попробуем хоть что-то показать —
+         * но полагаться на fb.* в этом случае небезопасно, поэтому просто
+         * останавливаемся. */
+        for (;;) { __asm__ volatile ("cli; hlt"); }
     }
 
-    kprintf("[boot] Multiboot magic OK (0x%x)\n", magic);
+    print_banner(boot_info);
+    console_print("OK\n");
 
-    kprintf("[init] GDT...\n");
+    kstate_set_boot_info(boot_info);
+
+    console_set_color(COLOR_CYAN, COLOR_BLACK);
+    console_print("GDT loading ... ");
     gdt_init();
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
+    console_print("OK\n");
 
-    kprintf("[init] IDT...\n");
+    console_set_color(COLOR_CYAN, COLOR_BLACK);
+    console_print("IDT + exception handlers ... ");
     idt_init();
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
+    console_print("OK\n");
 
-    kprintf("[init] ISR (обработчики исключений CPU)...\n");
-    isr_init();
+    console_set_color(COLOR_CYAN, COLOR_BLACK);
+    console_print("PIC remap (IRQ0-15 -> vectors 32-47) ... ");
+    pic_remap();
 
-    kprintf("[init] IRQ (PIC remap)...\n");
-    irq_init();
+    console_set_color(COLOR_CYAN, COLOR_BLACK);
+    console_print("PIT timer (100 Hz) ... ");
+    pit_init(100);
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
+    console_print("OK\n");
 
-    kprintf("[init] Timer (PIT, 100 Hz)...\n");
-    timer_init(100);
-
-    kprintf("[init] Keyboard...\n");
+    console_set_color(COLOR_CYAN, COLOR_BLACK);
+    console_print("Keyboard controller (i8042 init) ... ");
     keyboard_init();
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
+    console_print("OK\n");
 
-    /* Прерывания включаем только после того, как все обработчики
-     * зарегистрированы — иначе можно получить IRQ на несуществующий стаб. */
+    /* Разрешаем таймер (IRQ0) и клавиатуру (IRQ1), остальное пока маскируем */
+    for (int i = 0; i < 16; i++) pic_set_mask(i, i != 0 && i != 1);
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
+    console_print("OK\n\n");
+
+    console_set_color(COLOR_CYAN, COLOR_BLACK);
+    console_print("AHCI disk (SATA, port 0, LBA 0) ... ");
+    if (ahci_init() && fat32_mount(0)) {
+        console_set_color(COLOR_GREEN, COLOR_BLACK);
+        console_print("OK (FAT32 mounted, try 'diskls')\n");
+    } else {
+        console_set_color(COLOR_YELLOW, COLOR_BLACK);
+        console_print("not found (diskls/diskcat won't work, everything else is fine)\n");
+    }
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
+    console_print("\n");
+
+    console_set_color(COLOR_YELLOW, COLOR_BLACK);
+    console_print("\n");
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
+
+    shell_init();
+
     __asm__ volatile ("sti");
 
-    kprintf("[init] Physical Memory Manager...\n");
-    pmm_init((multiboot_info_t *)mbi_addr, (u32)&kernel_end);
-
-    kprintf("\nNexusOS готов. Нажимай клавиши — они появятся ниже:\n\n");
-
     for (;;) {
-        char c = keyboard_getchar();
-        if (c) {
-            kprintf("%c", c);
-        }
-        __asm__ volatile ("hlt"); /* спим до следующего прерывания, не жжём CPU */
+        __asm__ volatile ("hlt");
     }
 }
