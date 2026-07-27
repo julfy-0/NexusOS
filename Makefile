@@ -71,7 +71,7 @@ FS_OBJS := $(BUILD)/pci.o $(BUILD)/ahci.o $(BUILD)/fat32.o
 
 DRIVER_OBJS := $(BUILD)/console.o $(BUILD)/pic.o $(BUILD)/cpu.o $(BUILD)/keyboard.o $(BUILD)/pit.o
 
-APP_NAMES := vfs neofetch sysinfo about whoami version date echo reverse len \
+APP_NAMES := vfs neofetch sysinfo meminfo about whoami version date echo reverse len \
              upper lower title calc sum hex dec isprime fib \
              ls pwd cd mkdir rmdir touch rm cp mv \
              cat less head tail grep diff find \
