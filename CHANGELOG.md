@@ -2,6 +2,56 @@
 
 Формат: `## [версия] — codename` + список изменений. Новое — сверху.
 
+## [0.4.5] — memoria
+
+- `docs/STATUS.md`/`README.md` синхронизированы с реальным состоянием
+  кода — до этой записи `STATUS.md` всё ещё числил page tables и page
+  fault handler как "не сделано" (раздел "Что НЕ сделано"), хотя они
+  уже были в коде (см. 0.4.1/0.4.2) — версия здесь и версия в коде
+  разошлись, это тоже баг, просто в документации
+
+## [0.4.4] — memoria
+
+- Единый источник версии в коде — `include/nexus/nexus_version.h`
+  (`NEXUS_VERSION_STRING`). Раньше `version`, `neofetch` и `uname`
+  хардкодили три РАЗНЫЕ, не совпадающие друг с другом строки
+  (`"shell 0.2, kernel 0.3-experimental"` / `"0.3-experimental"` дважды),
+  и ни одна не совпадала с версией из `STATUS.md`. Теперь все три
+  подключают общий заголовок; `neofetch` заодно лишился более неверного
+  тега "(alpha)" у названия ОС
+- Названо `nexus_version.h`, а не `version.h` — в `kernel/shell/apps/`
+  уже есть свой `version.h` (заголовок команды `version`), одинаковое
+  имя означало бы, что инклюд подхватывает не тот файл в зависимости
+  от порядка путей поиска
+
+## [0.4.3] — memoria
+
+- Scrollback в консоли: PgUp/PgDn листают историю вывода
+  (`drivers/console/console.c`, `drivers/keyboard/keyboard.c`).
+  Кольцевой буфер на 500 строк (символ + цвет каждой ячейки), пишется
+  параллельно с живым выводом без просадки скорости печати. Любая
+  новая печать (набор текста, вывод команды) сама возвращает к живому
+  виду
+- PS/2 extended-scancode (префикс `0xE0`) — раньше драйвер клавиатуры
+  его вообще не обрабатывал, из-за чего PgUp/PgDn (и любые другие
+  extended-клавиши) молча терялись
+
+## [0.4.2] — memoria
+
+- Page fault handler (vector 14, `arch/x86_64/idt.c`) — расшифровка
+  CR2 (адрес обращения) и error code (present/write/user/reserved/
+  instruction-fetch) вместо общего `panic_screen()` без деталей
+
+## [0.4.1] — memoria
+
+- Свои page tables — `mm/paging.c`/`mm/paging.h`. 4-уровневая схема
+  x86_64 (PML4/PDPT/PD), 2 MiB страницы, строит identity-map по
+  EFI memory map из `boot_info` + framebuffer и реально переключает
+  CR3 (раньше жили на identity-map, оставленной UEFI firmware —
+  чужой формат, полагаться на который в принципе было нельзя)
+- `meminfo` дополнен диагностикой paging (CR3, размер базовой
+  identity-map)
+
 ## [0.4.0] — memoria
 
 - Milestone 0.3 (refit) формально закрыт: живой бут в QEMU+OVMF

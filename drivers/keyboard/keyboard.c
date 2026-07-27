@@ -2,6 +2,7 @@
  * Достаточно для интерактивной демонстрации — печатаем то, что набрали. */
 #include "keyboard.h"
 #include "shell.h"
+#include "console.h"
 #include "pic.h"
 #include "io.h"
 
@@ -16,7 +17,18 @@
 #define SC_RSHIFT 0x36
 #define SC_RELEASE_BIT 0x80
 
+/* PgUp/PgDn (как и стрелки, Home/End и т.п.) — "extended" клавиши в
+ * scancode set 1: контроллер шлёт их как ДВА байта, 0xE0 + собственно
+ * код, а не один байт как у обычных клавиш. Наша таблица scancode_ascii[]
+ * это не покрывает вообще (она рассчитана на однобайтовые make-коды),
+ * поэтому раньше 0xE0 и следующий за ним байт просто терялись/трактовались
+ * как непонятный код. */
+#define SC_EXTENDED_PREFIX 0xE0
+#define SC_PAGE_UP   0x49
+#define SC_PAGE_DOWN 0x51
+
 static int shift_down = 0;
+static int extended_prefix = 0; /* только что пришёл 0xE0, следующий байт — extended-код */
 
 /* Индекс — scancode (make code), значение — ASCII без Shift. 0 = игнорируем. */
 static const char scancode_ascii[128] = {
@@ -117,6 +129,27 @@ void keyboard_handle_irq(void) {
     }
 
     uint8_t sc = inb(KBD_DATA_PORT);
+
+    if (sc == SC_EXTENDED_PREFIX) {
+        extended_prefix = 1;
+        return; /* сам префикс не клавиша, а флаг "следующий байт — extended" */
+    }
+
+    if (extended_prefix) {
+        extended_prefix = 0;
+
+        if (sc == SC_PAGE_UP) {
+            /* Листаем назад (к старым строкам) на целый экран. */
+            console_scroll((int32_t)console_get_rows());
+        } else if (sc == SC_PAGE_DOWN) {
+            /* Листаем вперёд (к живому выводу) на целый экран. */
+            console_scroll(-(int32_t)console_get_rows());
+        }
+        /* Break-коды (сама клавиша | 0x80) и прочие extended-клавиши
+         * (стрелки, Home/End, ...) пока осознанно игнорируем — не наша
+         * задача сейчас, шелл всё равно однострочный. */
+        return;
+    }
 
     if (sc == SC_LSHIFT || sc == SC_RSHIFT) {
         shift_down = 1;

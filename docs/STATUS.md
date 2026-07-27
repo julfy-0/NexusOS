@@ -7,10 +7,14 @@
 
 ## Версия
 
-**0.4.0-memoria** (см. `docs/VERSIONING.md`). Milestone 0.3 (refit)
+**0.4.5-memoria** (см. `docs/VERSIONING.md`). Milestone 0.3 (refit)
 закрыт: живой бут в QEMU+OVMF подтверждён, встроенный шелл и команды
 проверены и работают. Предыдущий скачок 0.1.2 → 0.3.0 — замена
 архитектуры целиком, см. `docs/adr/0002-uefi-x86_64-pivot.md`.
+
+Версия теперь также зашита в код: `include/nexus/nexus_version.h` —
+единственное место в коде, откуда её берут команды `version`/`neofetch`/
+`uname` (раньше каждая хардкодила свою несовпадающую строку).
 
 ## Архитектура
 
@@ -41,12 +45,17 @@
       полный список в `kernel/shell/apps/`)
 - [x] `kstate` — глобальный доступ к boot_info (framebuffer, memory map)
       из любого места ядра
+- [x] Свои page tables (`mm/paging.c`) — 4-уровневая схема PML4/PDPT/PD,
+      2 MiB страницы, реально переключает CR3 (не identity-map от UEFI)
+- [x] Page fault handler (vector 14) — расшифровка CR2/error code
+      (present/write/user/reserved/instruction-fetch)
+- [x] Scrollback в консоли (PgUp/PgDn) — кольцевой буфер истории строк
+      в `drivers/console/console.c`, живой вывод не замедляет
 
 ## Что НЕ сделано
 
-- [ ] Виртуальная память / paging — сейчас identity map, оставленный
-      UEFI. Своя MMU-настройка — следующий милстоун (см. ROADMAP)
-- [ ] `kmalloc`/`kfree` (heap ядра)
+- [ ] `kmalloc`/`kfree` (heap ядра) — следующая задача, см. ниже
+- [ ] Higher-half kernel (переезд с 0x200000)
 - [ ] Многозадачность — всё выполняется синхронно в контексте
       прерывания клавиатуры
 - [ ] User mode (ring 3), системные вызовы — шелл и команды это
@@ -57,21 +66,20 @@
 ## Известные ограничения / долги
 
 - Клавиатура — US QWERTY, Shift обрабатывается, Ctrl/Alt — нет
+- Extended-клавиши (стрелки, Home/End) кроме PgUp/PgDn пока
+  игнорируются драйвером — не наша задача сейчас
 - Extras (`extras/c-practice/`) из старого проекта не перенесены —
   не относятся к ОС (личные C-упражнения автора)
 
 ## Следующая задача
 
-Milestone 0.3 (refit) закрыт. Дальше — Milestone 0.4 "memoria"
-(`docs/ROADMAP.md`):
+Milestone 0.4 "memoria" (`docs/ROADMAP.md`), первые два пункта уже
+закрыты (page tables, page fault handler). Осталось:
 
-1. Свои page tables (4-уровневая схема x86_64: PML4/PDPT/PD/PT) —
-   сейчас identity-map, оставленный UEFI firmware
-2. Page fault handler (vector 14) с осмысленной диагностикой
-3. `kmalloc`/`kfree` — heap ядра на основе page allocator +
+1. `kmalloc`/`kfree` — heap ядра на основе page allocator +
    физической memory map (уже приходит от UEFI через
    `nexus_boot_info_t.mmap`, см. `kstate_mem_summary()`)
-4. Higher-half kernel (переезд с 0x200000) — не критично сразу, но
+2. Higher-half kernel (переезд с 0x200000) — не критично сразу, но
    нужно перед user/kernel split (Milestone 0.6)
 
 ## Правила для продолжающего

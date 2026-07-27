@@ -12,6 +12,13 @@ void console_print(const char *s);
 void console_print_hex(uint64_t value);
 void console_print_dec(uint64_t value);
 
+/* Scrollback (PgUp/PgDn). delta в строках: положительный — листать назад
+ * (к старым строкам), отрицательный — вперёд (к живому выводу). Любая
+ * новая печать через console_putchar() сама возвращает к живому виду —
+ * вызывающему (клавиатуре) не нужно об этом заботиться. */
+void console_scroll(int32_t delta);
+uint32_t console_get_rows(void);
+
 /* Готовые цвета в формате 0x00RRGGBB (конвертация под пиксельный формат
  * экрана происходит внутри console.c) */
 #define COLOR_BLACK   0x000000
