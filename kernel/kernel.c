@@ -8,6 +8,7 @@
 #include "console.h"
 #include "gdt.h"
 #include "idt.h"
+#include "paging.h"
 #include "pic.h"
 #include "kstate.h"
 #include "shell.h"
@@ -68,6 +69,12 @@ void kmain(nexus_boot_info_t *boot_info) {
     console_set_color(COLOR_CYAN, COLOR_BLACK);
     console_print("IDT + exception handlers ... ");
     idt_init();
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
+    console_print("OK\n");
+
+    console_set_color(COLOR_CYAN, COLOR_BLACK);
+    console_print("Paging (own PML4/PDPT/PD, identity map) ... ");
+    paging_init(boot_info);
     console_set_color(COLOR_WHITE, COLOR_BLACK);
     console_print("OK\n");
 

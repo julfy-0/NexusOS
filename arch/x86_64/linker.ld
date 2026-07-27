@@ -1,8 +1,9 @@
 /* NexusOS kernel linker script.
  *
- * Пока используем identity mapping, оставленный прошивкой UEFI: виртуальный
- * адрес == физический. Переход на честный higher-half + свои page tables —
- * отдельный милстоун. */
+ * Identity mapping (виртуальный адрес == физический) — но с Milestone 0.4
+ * это уже СВОИ page tables (mm/paging.c, docs/adr/0003), не унаследованные
+ * от UEFI. Переход на честный higher-half — отдельный будущий шаг того же
+ * милстоуна (см. ROADMAP.md), адрес 0x200000 ниже пока не меняется. */
 ENTRY(_start)
 
 SECTIONS

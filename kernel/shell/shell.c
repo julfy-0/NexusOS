@@ -6,6 +6,7 @@
 #include "console.h"
 #include "neofetch.h"
 #include "sysinfo.h"
+#include "meminfo.h"
 #include "echo.h"
 #include "reverse.h"
 #include "len.h"
@@ -133,6 +134,8 @@ static void execute(char *cmd) {
         neofetch_run();
     } else if (strcmp(cmd, "sysinfo") == 0) {
         sysinfo_run();
+    } else if (strcmp(cmd, "meminfo") == 0) {
+        meminfo_run();
     } else if (strcmp(cmd, "echo") == 0) {
         echo_run(args);
     } else if (strcmp(cmd, "reverse") == 0) {
@@ -236,6 +239,7 @@ static void execute(char *cmd) {
         console_print("  --- info ---\n");
         console_print("  neofetch          - system info\n");
         console_print("  sysinfo           - shell status\n");
+        console_print("  meminfo           - paging / memory map status\n");
         console_print("  about             - about NexusOS\n");
         console_print("  whoami            - who you are\n");
         console_print("  version           - shell version\n");

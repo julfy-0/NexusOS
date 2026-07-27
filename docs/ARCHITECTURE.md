@@ -54,11 +54,25 @@ remap (`drivers/pic/pic.c`). Общий ассемблерный стаб
 
 ## Память
 
-**Identity map, оставленный UEFI firmware** — не наша собственная
-virtual memory. Виртуальный адрес == физический. `nexus_boot_info_t`
-несёт полную EFI memory map (`kstate_mem_summary()` уже умеет её
-просуммировать), но из этого пока не построен настоящий allocator —
-это Milestone "memoria" (`docs/ROADMAP.md`).
+**Свои page tables** (`mm/paging.c`, `docs/adr/0003`) — с Milestone 0.4
+ядро больше не полагается на таблицы, оставленные UEFI firmware.
+Схема пока та же по смыслу — identity map (виртуальный адрес ==
+физический), 2 MiB страницы (PS-бит в PD, без PT). Покрытие строится
+в три слоя: безусловно первые 4 GiB, затем каждый регион из настоящей
+EFI memory map (включая MMIO/reserved), затем framebuffer явно (он не
+гарантированно попадает в memory map тем же адресом). `paging_init()`
+вызывается из `kmain()` сразу после `idt_init()` — так page fault во
+время самой настройки паджинга хотя бы красиво диагностируется
+(vector 14, CR2 + расшифровка error code в `arch/x86_64/idt.c`), а не
+уходит в тройной fault.
+
+`nexus_boot_info_t` несёт полную EFI memory map (`kstate_mem_summary()`
+умеет её просуммировать; шелл-команда `meminfo` показывает и paging-,
+и memory-map-статус), но из этого пока не построен настоящий allocator
+— `kmalloc`/`kfree` это следующий шаг Milestone "memoria"
+(`docs/ROADMAP.md`). Higher-half kernel и разделение прав страниц
+(`.text` read+exec, `.rodata` read-only — сейчас всё read+write) тоже
+ещё не сделаны, см. `docs/adr/0003` "Последствия".
 
 ## Драйверы и связи между модулями
 

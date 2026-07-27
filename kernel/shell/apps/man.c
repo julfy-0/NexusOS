@@ -4,7 +4,9 @@
 extern int strcmp(const char *a, const char *b);
 
 void man_run(char *args) {
-    if (strcmp(args, "ls") == 0) {
+    if (strcmp(args, "meminfo") == 0) {
+        console_print("meminfo - show paging status (CR3, identity map range) and EFI memory map summary\n");
+    } else if (strcmp(args, "ls") == 0) {
         console_print("ls - list files and directories in the current directory\n");
     } else if (strcmp(args, "cd") == 0) {
         console_print("cd <dir> - change current directory. Use '..' to go up.\n");

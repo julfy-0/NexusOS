@@ -23,7 +23,7 @@ ISODIR  := iso
 
 INCLUDES := -Iinclude/nexus -Iarch/x86_64 -Ikernel -Ikernel/shell -Ikernel/shell/apps \
             -Idrivers/console -Idrivers/cpu -Idrivers/keyboard -Idrivers/pic -Idrivers/timer \
-            -Idrivers/storage -Ifs
+            -Idrivers/storage -Ifs -Imm
 
 # --- Загрузчик: freestanding PE32+/EFI, MS x64 ABI ---
 CFLAGS_EFI  := -ffreestanding -fno-stack-protector -fno-stack-check \
@@ -64,6 +64,7 @@ bootloader: $(BOOT_OBJS)
 
 CORE_OBJS := $(BUILD)/entry.o $(BUILD)/kernel.o \
              $(BUILD)/gdt.o $(BUILD)/gdt_asm.o $(BUILD)/idt.o $(BUILD)/isr.o \
+             $(BUILD)/paging.o \
              $(BUILD)/kstate.o $(BUILD)/mem_kernel.o
 
 FS_OBJS := $(BUILD)/pci.o $(BUILD)/ahci.o $(BUILD)/fat32.o
@@ -98,6 +99,10 @@ $(BUILD)/gdt.o: arch/x86_64/gdt.c | $(BUILD)
 
 $(BUILD)/idt.o: arch/x86_64/idt.c | $(BUILD)
 	$(CC) $(CFLAGS_KERNEL) arch/x86_64/idt.c -o $@
+
+# -- mm/ --
+$(BUILD)/paging.o: mm/paging.c mm/paging.h | $(BUILD)
+	$(CC) $(CFLAGS_KERNEL) mm/paging.c -o $@
 
 # -- kernel/ --
 $(BUILD)/kernel.o: kernel/kernel.c | $(BUILD)
@@ -173,7 +178,7 @@ run: iso
 
 # Быстрая проверка синтаксиса всех .c без реальной сборки.
 check:
-	@for f in $$(find boot kernel drivers fs lib -name '*.c'); do \
+	@for f in $$(find boot kernel drivers fs lib mm -name '*.c'); do \
 		$(CC) $(CFLAGS_KERNEL) -fsyntax-only $$f || exit 1; \
 	done
 	@echo "==> Синтаксис в порядке"
