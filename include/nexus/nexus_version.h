@@ -12,9 +12,9 @@
 
 #define NEXUS_VERSION_MAJOR    0
 #define NEXUS_VERSION_MINOR    4
-#define NEXUS_VERSION_PATCH    5
+#define NEXUS_VERSION_PATCH    6
 #define NEXUS_VERSION_CODENAME "memoria"
 
-#define NEXUS_VERSION_STRING "0.4.5-memoria"
+#define NEXUS_VERSION_STRING "0.4.6-memoria"
 
 #endif

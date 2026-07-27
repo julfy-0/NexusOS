@@ -26,6 +26,8 @@
 #define SC_EXTENDED_PREFIX 0xE0
 #define SC_PAGE_UP   0x49
 #define SC_PAGE_DOWN 0x51
+#define SC_ARROW_UP   0x48
+#define SC_ARROW_DOWN 0x50
 
 static int shift_down = 0;
 static int extended_prefix = 0; /* только что пришёл 0xE0, следующий байт — extended-код */
@@ -139,14 +141,24 @@ void keyboard_handle_irq(void) {
         extended_prefix = 0;
 
         if (sc == SC_PAGE_UP) {
-            /* Листаем назад (к старым строкам) на целый экран. */
-            console_scroll((int32_t)console_get_rows());
+            /* Листаем назад (к старым строкам) на одну строку за нажатие.
+             * PS/2-контроллер сам шлёт повторные make-коды, пока клавиша
+             * зажата (typematic repeat) — так что удержание само по себе
+             * даёт быстрый непрерывный скролл, без доп. логики здесь. */
+            console_scroll(1);
         } else if (sc == SC_PAGE_DOWN) {
-            /* Листаем вперёд (к живому выводу) на целый экран. */
-            console_scroll(-(int32_t)console_get_rows());
+            /* Листаем вперёд (к живому выводу) на одну строку за нажатие. */
+            console_scroll(-1);
+        } else if (sc == SC_ARROW_UP) {
+            /* Стрелка вверх — предыдущая команда из истории шелла. */
+            shell_history_prev();
+        } else if (sc == SC_ARROW_DOWN) {
+            /* Стрелка вниз — следующая команда из истории (или назад к
+             * тому, что печаталось до начала пролистывания). */
+            shell_history_next();
         }
         /* Break-коды (сама клавиша | 0x80) и прочие extended-клавиши
-         * (стрелки, Home/End, ...) пока осознанно игнорируем — не наша
+         * (Home/End, Left/Right, ...) пока осознанно игнорируем — не наша
          * задача сейчас, шелл всё равно однострочный. */
         return;
     }

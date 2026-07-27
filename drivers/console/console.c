@@ -110,8 +110,12 @@ void console_set_color(uint32_t fg, uint32_t bg) {
  * "прямо сейчас", просто пакует текущие глобальные цвета и зовёт raw. */
 static void draw_glyph_raw(uint32_t col, uint32_t row, char c, uint32_t fg, uint32_t bg) {
     const uint8_t *glyph;
-    if (c >= FONT_FIRST_CHAR && c <= FONT_LAST_CHAR) {
-        glyph = font8x16[(uint8_t)c - FONT_FIRST_CHAR];
+    /* Сравниваем через unsigned char: c может быть signed char, и коды
+     * шрифта за пределами 127 (если шрифт расширят дальше) иначе стали бы
+     * отрицательными и вываливались из диапазона. */
+    unsigned char uc = (unsigned char)c;
+    if (uc >= FONT_FIRST_CHAR && uc <= FONT_LAST_CHAR) {
+        glyph = font8x16[uc - FONT_FIRST_CHAR];
     } else {
         glyph = font8x16[0]; /* неизвестный символ (в т.ч. ch==0 пустой ячейки) -> пробел */
     }

@@ -9,18 +9,29 @@
 #include "boot_info.h"
 #include "nexus_version.h"
 
-#define LOGO_WIDTH 20
+#define LOGO_WIDTH 12
+/* Байт-коды новых глифов рамки (см. font8x16.h) — используем вместо
+ * UTF-8-литералов, т.к. консоль читает один байт = одна клетка, без
+ * декодера многобайтовых последовательностей. */
+#define B  "\x7F" /* █ */
+#define TR "\x80" /* ╗ */
+#define VB "\x81" /* ║ */
+#define TL "\x82" /* ╔ */
+#define BL "\x83" /* ╚ */
+#define HB "\x84" /* ═ */
+#define BR "\x85" /* ╝ */
 
 static const char *logo[] = {
-    "     _   _         ",
-    "    | \\ | | _____  ",
-    "    |  \\| |/ _ \\ \\ ",
-    "    | |\\  |  __/> >",
-    "    |_| \\_|\\___/_/ ",
-    "                    ",
-    "       NexusOS      ",
-    "                    ",
+     " "B B B TR "   " B B TR,
+     " "B B B B TR "  " B B VB,
+     " "B B TL B B TR " " B B VB,
+     " "B B VB BL B B TR B B VB,
+     " "B B VB " " BL B B B B VB,
+     " "BL HB BR "  " BL HB HB HB BR,
+    "          ",
+    "  NexusOS  ",
 };
+
 #define LOGO_LINES (int)(sizeof(logo) / sizeof(logo[0]))
 
 static void print_padded(const char *s, int width, uint32_t color) {
@@ -31,6 +42,14 @@ static void print_padded(const char *s, int width, uint32_t color) {
         n++;
     }
     for (; n < width; n++) console_putchar(' ');
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
+}
+
+/* Печатает "Label: " зелёным (в цвет логотипа), значение — уже обычным
+ * белым цветом, которое выставляет print_padded для остатка строки. */
+static void print_label(const char *label) {
+    console_set_color(COLOR_GREEN, COLOR_BLACK);
+    console_print(label);
     console_set_color(COLOR_WHITE, COLOR_BLACK);
 }
 
@@ -55,46 +74,49 @@ void neofetch_run(void) {
     int row = 0;
 
     print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
-    console_print("OS: NexusOS x86_64\n");
+    print_label("OS: ");
+    console_print("NexusOS x86_64\n");
 
     print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
-    console_print("Kernel: " NEXUS_VERSION_STRING "\n");
+    print_label("Kernel: ");
+    console_print(NEXUS_VERSION_STRING "\n");
 
     print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
-    console_print("CPU Vendor: ");
+    print_label("CPU Vendor: ");
     console_print(vendor);
     console_print("\n");
 
     print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
+    print_label("CPU: ");
     if (have_brand) {
-        console_print("CPU: ");
         console_print(brand);
     } else {
-        console_print("CPU: (no brand string reported)");
+        console_print("(no brand string reported)");
     }
     console_print("\n");
 
     print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
-    console_print("Cores (logical): ");
+    print_label("Cores (logical): ");
     console_print_dec(cores);
     console_print("\n");
 
     print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
-    console_print("Memory: ");
+    print_label("Memory: ");
     console_print_dec(free_mb);
     console_print(" MB free / ");
     console_print_dec(total_mb);
     console_print(" MB detected\n");
 
     print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
-    console_print("Resolution: ");
+    print_label("Resolution: ");
     console_print_dec(bi->fb.width);
     console_print("x");
     console_print_dec(bi->fb.height);
     console_print("\n");
 
     print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
-    console_print("Bootloader: NexusOS custom UEFI loader\n");
+    print_label("Bootloader: ");
+    console_print("NexusOS custom UEFI loader\n");
 
     while (row < LOGO_LINES) {
         print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);

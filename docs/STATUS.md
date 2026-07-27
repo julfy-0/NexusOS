@@ -7,7 +7,7 @@
 
 ## Версия
 
-**0.4.5-memoria** (см. `docs/VERSIONING.md`). Milestone 0.3 (refit)
+**0.4.6-memoria** (см. `docs/VERSIONING.md`). Milestone 0.3 (refit)
 закрыт: живой бут в QEMU+OVMF подтверждён, встроенный шелл и команды
 проверены и работают. Предыдущий скачок 0.1.2 → 0.3.0 — замена
 архитектуры целиком, см. `docs/adr/0002-uefi-x86_64-pivot.md`.
