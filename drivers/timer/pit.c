@@ -39,3 +39,7 @@ uint64_t pit_get_uptime_seconds(void) {
 uint64_t pit_get_uptime_ms(void) {
     return (g_ticks * 1000ULL) / g_frequency;
 }
+
+uint32_t pit_get_frequency_hz(void) {
+    return g_frequency;
+}

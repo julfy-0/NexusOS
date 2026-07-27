@@ -51,6 +51,9 @@
       (present/write/user/reserved/instruction-fetch)
 - [x] Scrollback в консоли (PgUp/PgDn) — кольцевой буфер истории строк
       в `drivers/console/console.c`, живой вывод не замедляет
+- [x] `neofetch` расширен: измеренная частота CPU (калибровка TSC по
+      PIT, `cpu_measure_freq_mhz()`), пользователь, uptime — не только
+      vendor/brand/cores/память, как раньше
 
 ## Что НЕ сделано
 
@@ -65,6 +68,13 @@
 
 ## Известные ограничения / долги
 
+- `neofetch`/`meminfo` показывают память из статичного снимка EFI
+  memory map с момента бута, не живой трекинг аллокаций — `kmalloc`
+  ещё не существует, значит и трекать пока нечего. Как появится heap —
+  заменить на честную живую статистику аллокатора (см. комментарий в
+  `kernel/shell/apps/neofetch.c`).
+- `neofetch` блокирует на ~150 мс на калибровку CPU-частоты (busy-wait
+  на PIT) — ожидаемо, не баг.
 - Клавиатура — US QWERTY, Shift обрабатывается, Ctrl/Alt — нет
 - Extended-клавиши (стрелки, Home/End) кроме PgUp/PgDn пока
   игнорируются драйвером — не наша задача сейчас

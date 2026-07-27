@@ -15,6 +15,12 @@ static void hist_new_line(void);
 static nexus_framebuffer_t *g_fb;
 static uint32_t g_fg = 0xFFFFFF;
 static uint32_t g_bg = 0x000000;
+/* Кэш уже "запакованных" под пиксельный формат экрана g_fg/g_bg — раньше
+ * pack_color() (сдвиги + маски) пересчитывался заново на каждый символ и
+ * на каждую ячейку истории, хотя цвет между вызовами почти всегда не
+ * меняется. Пересчитываем только в console_set_color()/console_init(). */
+static uint32_t g_fg_packed = 0xFFFFFF;
+static uint32_t g_bg_packed = 0x000000;
 static uint32_t g_col = 0;
 static uint32_t g_row = 0;
 static uint32_t g_cols;
@@ -56,11 +62,19 @@ static uint32_t pack_color(uint32_t rgb) {
     uint8_t r = (rgb >> 16) & 0xFF;
     uint8_t g = (rgb >> 8) & 0xFF;
     uint8_t b = rgb & 0xFF;
+    /* GOP PixelRedGreenBlueReserved8BitPerColor: байт0=R, байт1=G, байт2=B
+     * (little-endian) -> 32-битное слово = R | (G<<8) | (B<<16).
+     * PixelBlueGreenRedReserved8BitPerColor: байт0=B, байт1=G, байт2=R
+     * -> слово = B | (G<<8) | (R<<16).
+     * ВАЖНО: раньше эти две ветки считали формулу друг друга (были
+     * переставлены местами) — из-за этого R и B визуально менялись
+     * местами на любом экране, где GOP реально отдаёт BGR (это самый
+     * частый случай на реальном железе и в QEMU). */
     if (g_fb->pixel_format == NEXUS_PIXFMT_BGR) {
-        return (uint32_t)b << 16 | (uint32_t)g << 8 | (uint32_t)r;
+        return (uint32_t)b | (uint32_t)g << 8 | (uint32_t)r << 16;
     }
     /* RGB и "прочее" (bitmask-форматы почти всегда тоже RGB на практике) */
-    return (uint32_t)r << 16 | (uint32_t)g << 8 | (uint32_t)b;
+    return (uint32_t)r | (uint32_t)g << 8 | (uint32_t)b << 16;
 }
 
 static inline void put_pixel(uint32_t x, uint32_t y, uint32_t color) {
@@ -73,6 +87,10 @@ void console_init(nexus_framebuffer_t *fb) {
     g_fb = fb;
     g_cols = g_fb->width / FONT_WIDTH;
     g_rows = g_fb->height / FONT_HEIGHT;
+
+    /* pixel_format известен только теперь (пришёл в fb) - пересчитать кэш */
+    g_fg_packed = pack_color(g_fg);
+    g_bg_packed = pack_color(g_bg);
 
     g_total_lines = 0;
     g_scroll_offset = 0;
@@ -92,7 +110,7 @@ void console_clear(void) {
 
     g_col = 0;
     g_row = 0;
-    uint32_t bg = pack_color(g_bg);
+    uint32_t bg = g_bg_packed;
     for (uint32_t y = 0; y < g_fb->height; y++) {
         uint32_t *row = (uint32_t *)(uintptr_t)(g_fb->base + (uint64_t)y * g_fb->pixels_per_scanline * 4);
         for (uint32_t x = 0; x < g_fb->width; x++) row[x] = bg;
@@ -102,6 +120,8 @@ void console_clear(void) {
 void console_set_color(uint32_t fg, uint32_t bg) {
     g_fg = fg;
     g_bg = bg;
+    g_fg_packed = pack_color(g_fg);
+    g_bg_packed = pack_color(g_bg);
 }
 
 /* draw_glyph_raw принимает УЖЕ запакованные цвета — нужно для перерисовки
@@ -110,12 +130,8 @@ void console_set_color(uint32_t fg, uint32_t bg) {
  * "прямо сейчас", просто пакует текущие глобальные цвета и зовёт raw. */
 static void draw_glyph_raw(uint32_t col, uint32_t row, char c, uint32_t fg, uint32_t bg) {
     const uint8_t *glyph;
-    /* Сравниваем через unsigned char: c может быть signed char, и коды
-     * шрифта за пределами 127 (если шрифт расширят дальше) иначе стали бы
-     * отрицательными и вываливались из диапазона. */
-    unsigned char uc = (unsigned char)c;
-    if (uc >= FONT_FIRST_CHAR && uc <= FONT_LAST_CHAR) {
-        glyph = font8x16[uc - FONT_FIRST_CHAR];
+    if (c >= FONT_FIRST_CHAR && c <= FONT_LAST_CHAR) {
+        glyph = font8x16[(uint8_t)c - FONT_FIRST_CHAR];
     } else {
         glyph = font8x16[0]; /* неизвестный символ (в т.ч. ch==0 пустой ячейки) -> пробел */
     }
@@ -133,7 +149,7 @@ static void draw_glyph_raw(uint32_t col, uint32_t row, char c, uint32_t fg, uint
 }
 
 static void draw_glyph(uint32_t col, uint32_t row, char c) {
-    draw_glyph_raw(col, row, c, pack_color(g_fg), pack_color(g_bg));
+    draw_glyph_raw(col, row, c, g_fg_packed, g_bg_packed);
 }
 
 /* --- scrollback: запись в историю и перерисовка из неё --- */
@@ -147,11 +163,10 @@ static inline uint64_t hist_slot(uint64_t logical_line) {
  * показывать мусор с многих оборотов назад. */
 static void hist_clear_line(uint64_t logical_line) {
     console_cell_t *row = g_history[hist_slot(logical_line)];
-    uint32_t bg = pack_color(g_bg);
     for (uint32_t x = 0; x < MAX_COLS; x++) {
         row[x].ch = ' ';
-        row[x].fg = pack_color(g_fg);
-        row[x].bg = bg;
+        row[x].fg = g_fg_packed;
+        row[x].bg = g_bg_packed;
     }
 }
 
@@ -160,8 +175,8 @@ static void hist_put(uint32_t col, char c) {
     if (col >= MAX_COLS) return;
     console_cell_t *row = g_history[hist_slot(g_total_lines)];
     row[col].ch = c;
-    row[col].fg = pack_color(g_fg);
-    row[col].bg = pack_color(g_bg);
+    row[col].fg = g_fg_packed;
+    row[col].bg = g_bg_packed;
 }
 
 /* Закрывает текущую строку и открывает следующую (с чистого листа). */
@@ -175,7 +190,7 @@ static void hist_new_line(void) {
  * самой первой когда-либо напечатанной) или она уже была затёрта кольцом —
  * рисуем просто фон. */
 static void render_history_row(uint32_t screen_row, uint64_t logical_line, int valid) {
-    uint32_t bg = pack_color(g_bg);
+    uint32_t bg = g_bg_packed;
     for (uint32_t x = 0; x < g_cols && x < MAX_COLS; x++) {
         if (valid) {
             console_cell_t *cell = &g_history[hist_slot(logical_line)][x];
@@ -232,7 +247,7 @@ static void scroll_if_needed(void) {
     memmove(base, base + (uint64_t)scroll_px * line_bytes,
             (uint64_t)(g_fb->height - scroll_px) * line_bytes);
 
-    uint32_t bg = pack_color(g_bg);
+    uint32_t bg = g_bg_packed;
     for (uint32_t y = g_fb->height - scroll_px; y < g_fb->height; y++) {
         uint32_t *row = (uint32_t *)(base + (uint64_t)y * line_bytes);
         for (uint32_t x = 0; x < g_fb->width; x++) row[x] = bg;

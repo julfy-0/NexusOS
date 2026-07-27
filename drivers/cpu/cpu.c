@@ -1,5 +1,6 @@
 /* NexusOS: минимальный доступ к CPUID. */
 #include "cpu.h"
+#include "pit.h"
 
 static inline void cpuid(uint32_t leaf, uint32_t subleaf,
                           uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d) {
@@ -50,4 +51,41 @@ uint32_t cpu_logical_cores(void) {
     cpuid(1, 0, &a, &b, &c, &d);
     uint32_t count = (b >> 16) & 0xFF;
     return count == 0 ? 1 : count;
+}
+
+static inline uint64_t rdtsc(void) {
+    uint32_t lo, hi;
+    /* rdtsc кладёт младшие 32 бита в EAX, старшие — в EDX. */
+    __asm__ volatile ("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((uint64_t)hi << 32) | lo;
+}
+
+/* Сколько тиков PIT ждать при калибровке. При 100 Гц (см. kernel.c,
+ * pit_init(100)) это ~150 мс — достаточно для погрешности в пределах
+ * пары процентов, и не настолько долго, чтобы neofetch ощутимо тормозил. */
+#define CALIBRATION_TICKS 15
+
+uint32_t cpu_measure_freq_mhz(void) {
+    uint32_t pit_hz = pit_get_frequency_hz();
+    if (pit_hz == 0) return 0; /* PIT почему-то не настроен — не должно случиться */
+
+    /* Ждём начала "свежего" тика, чтобы не начать измерение в
+     * произвольной точке внутри уже идущего интервала (иначе первый
+     * замер будет короче остальных и собьёт точность). */
+    uint64_t start_tick = pit_get_ticks();
+    while (pit_get_ticks() == start_tick) { /* spin */ }
+    start_tick = pit_get_ticks();
+
+    uint64_t tsc_start = rdtsc();
+    uint64_t target_tick = start_tick + CALIBRATION_TICKS;
+    while (pit_get_ticks() < target_tick) { /* spin */ }
+    uint64_t tsc_end = rdtsc();
+
+    uint64_t ticks_elapsed = pit_get_ticks() - start_tick;
+    if (ticks_elapsed == 0) return 0; /* защита от деления на 0, в теории недостижимо */
+
+    uint64_t cycles = tsc_end - tsc_start;
+    /* freq_hz = cycles / (ticks_elapsed / pit_hz) = cycles * pit_hz / ticks_elapsed */
+    uint64_t freq_hz = (cycles * (uint64_t)pit_hz) / ticks_elapsed;
+    return (uint32_t)(freq_hz / 1000000ULL);
 }

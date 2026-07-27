@@ -5,34 +5,31 @@
 #include "neofetch.h"
 #include "console.h"
 #include "cpu.h"
+#include "pit.h"
 #include "kstate.h"
 #include "boot_info.h"
 #include "nexus_version.h"
 
-#define LOGO_WIDTH 12
-/* Байт-коды новых глифов рамки (см. font8x16.h) — используем вместо
- * UTF-8-литералов, т.к. консоль читает один байт = одна клетка, без
- * декодера многобайтовых последовательностей. */
-#define B  "\x7F" /* █ */
-#define TR "\x80" /* ╗ */
-#define VB "\x81" /* ║ */
-#define TL "\x82" /* ╔ */
-#define BL "\x83" /* ╚ */
-#define HB "\x84" /* ═ */
-#define BR "\x85" /* ╝ */
+#define LOGO_WIDTH 20
 
 static const char *logo[] = {
-     " "B B B TR "   " B B TR,
-     " "B B B B TR "  " B B VB,
-     " "B B TL B B TR " " B B VB,
-     " "B B VB BL B B TR B B VB,
-     " "B B VB " " BL B B B B VB,
-     " "BL HB BR "  " BL HB HB HB BR,
-    "          ",
-    "  NexusOS  ",
+    "     _   _         ",
+    "    | \\ | | _____  ",
+    "    |  \\| |/ _ \\ \\ ",
+    "    | |\\  |  __/> >",
+    "    |_| \\_|\\___/_/ ",
+    "                    ",
+    "       NexusOS      ",
+    "                    ",
 };
-
 #define LOGO_LINES (int)(sizeof(logo) / sizeof(logo[0]))
+
+/* Строк с информацией теперь больше, чем строк ASCII-лого (11 против 8) —
+ * для строк за пределами logo[] печатаем просто отступ нужной ширины. */
+static const char *logo_line(int row) {
+    if (row < LOGO_LINES) return logo[row];
+    return "";
+}
 
 static void print_padded(const char *s, int width, uint32_t color) {
     console_set_color(color, COLOR_BLACK);
@@ -42,14 +39,6 @@ static void print_padded(const char *s, int width, uint32_t color) {
         n++;
     }
     for (; n < width; n++) console_putchar(' ');
-    console_set_color(COLOR_WHITE, COLOR_BLACK);
-}
-
-/* Печатает "Label: " зелёным (в цвет логотипа), значение — уже обычным
- * белым цветом, которое выставляет print_padded для остатка строки. */
-static void print_label(const char *label) {
-    console_set_color(COLOR_GREEN, COLOR_BLACK);
-    console_print(label);
     console_set_color(COLOR_WHITE, COLOR_BLACK);
 }
 
@@ -65,61 +54,98 @@ void neofetch_run(void) {
 
     uint32_t cores = cpu_logical_cores();
 
+    /* Реальное измерение через калибровку TSC по PIT — см. cpu.c.
+     * Блокирует на ~150 мс, это ожидаемо (не баг, если neofetch на
+     * секунду "задумывается" перед выводом). */
+    uint32_t cpu_mhz = cpu_measure_freq_mhz();
+
+    /* kstate_mem_summary() пересчитывает эти числа заново на каждый вызов
+     * (не кэш), но источник — статичный снимок EFI memory map с момента
+     * бута. Это НЕ живой трекинг реальных аллокаций — kmalloc/kfree ещё
+     * не существует (см. docs/STATUS.md), так что "free" здесь означает
+     * "было свободно на момент передачи управления ядру", а не "свободно
+     * прямо сейчас". Как только появится heap — это надо будет заменить
+     * на честную живую статистику аллокатора. */
     uint64_t total_pages = 0, conventional_pages = 0;
     kstate_mem_summary(&total_pages, &conventional_pages);
     uint64_t total_mb = (total_pages * 4096ULL) / (1024ULL * 1024ULL);
     uint64_t free_mb = (conventional_pages * 4096ULL) / (1024ULL * 1024ULL);
 
+    uint64_t uptime_s = pit_get_uptime_seconds();
+    uint64_t up_h = uptime_s / 3600;
+    uint64_t up_m = (uptime_s % 3600) / 60;
+    uint64_t up_sec = uptime_s % 60;
+
     console_print("\n");
     int row = 0;
 
-    print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
-    print_label("OS: ");
-    console_print("NexusOS x86_64\n");
+    print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
+    console_print("OS: NexusOS x86_64\n");
 
-    print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
-    print_label("Kernel: ");
-    console_print(NEXUS_VERSION_STRING "\n");
+    print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
+    console_print("Kernel: " NEXUS_VERSION_STRING "\n");
 
-    print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
-    print_label("CPU Vendor: ");
+    print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
+    console_print("User: root@nexusos\n");
+
+    print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
+    console_print("CPU Vendor: ");
     console_print(vendor);
     console_print("\n");
 
-    print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
-    print_label("CPU: ");
+    print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
     if (have_brand) {
+        console_print("CPU: ");
         console_print(brand);
     } else {
-        console_print("(no brand string reported)");
+        console_print("CPU: (no brand string reported)");
     }
     console_print("\n");
 
-    print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
-    print_label("Cores (logical): ");
+    print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
+    console_print("CPU Speed: ");
+    if (cpu_mhz > 0) {
+        console_print("~");
+        console_print_dec(cpu_mhz);
+        console_print(" MHz (measured via TSC/PIT)");
+    } else {
+        console_print("unknown");
+    }
+    console_print("\n");
+
+    print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
+    console_print("Cores (logical): ");
     console_print_dec(cores);
     console_print("\n");
 
-    print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
-    print_label("Memory: ");
+    print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
+    console_print("Memory: ");
     console_print_dec(free_mb);
-    console_print(" MB free / ");
+    console_print(" MB free (at boot) / ");
     console_print_dec(total_mb);
     console_print(" MB detected\n");
 
-    print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
-    print_label("Resolution: ");
+    print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
+    console_print("Uptime: ");
+    console_print_dec(up_h);
+    console_print("h ");
+    console_print_dec(up_m);
+    console_print("m ");
+    console_print_dec(up_sec);
+    console_print("s\n");
+
+    print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
+    console_print("Resolution: ");
     console_print_dec(bi->fb.width);
     console_print("x");
     console_print_dec(bi->fb.height);
     console_print("\n");
 
-    print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
-    print_label("Bootloader: ");
-    console_print("NexusOS custom UEFI loader\n");
+    print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
+    console_print("Bootloader: NexusOS custom UEFI loader\n");
 
     while (row < LOGO_LINES) {
-        print_padded(logo[row++], LOGO_WIDTH, COLOR_GREEN);
+        print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
         console_print("\n");
     }
 
