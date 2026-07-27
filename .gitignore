@@ -6,3 +6,4 @@ iso/
 *.img
 *.iso
 *.tar.gz
+.zip
