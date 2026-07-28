@@ -300,6 +300,54 @@ void console_print(const char *s) {
     while (*s) console_putchar(*s++);
 }
 
+/* Общая реализация console_status_ok()/_fail()/_warn(): дописывает
+ * пробелами текущую строку до правого края (g_cols - ширина статуса),
+ * затем печатает "[ LABEL ]" цветом color и переводит строку.
+ *
+ * Если то, что уже напечатано слева, само длиннее доступного места —
+ * никуда не подгоняем и не обрезаем, просто ставим статус сразу после
+ * текста (перенос строки консоль и так сделает сама, если нужно). */
+static void print_status(const char *label, uint32_t color) {
+    uint32_t label_len = 0;
+    while (label[label_len]) label_len++;
+
+    /* "[ " + label + " ]" */
+    uint32_t status_width = label_len + 4;
+    uint32_t target_col = (g_cols > status_width) ? (g_cols - status_width) : g_col;
+
+    uint32_t saved_fg = g_fg;
+    uint32_t saved_bg = g_bg;
+
+    if (g_col < target_col) {
+        console_set_color(saved_fg, saved_bg);
+        while (g_col < target_col) console_putchar(' ');
+    }
+
+    console_set_color(COLOR_WHITE, saved_bg);
+    console_putchar('[');
+    console_putchar(' ');
+    console_set_color(color, saved_bg);
+    console_print(label);
+    console_set_color(COLOR_WHITE, saved_bg);
+    console_putchar(' ');
+    console_putchar(']');
+    console_putchar('\n');
+
+    console_set_color(saved_fg, saved_bg);
+}
+
+void console_status_ok(void) {
+    print_status("OK", COLOR_GREEN);
+}
+
+void console_status_fail(void) {
+    print_status("FAIL", COLOR_RED);
+}
+
+void console_status_warn(void) {
+    print_status("WARN", COLOR_YELLOW);
+}
+
 void console_print_hex(uint64_t value) {
     console_print("0x");
     char buf[17];

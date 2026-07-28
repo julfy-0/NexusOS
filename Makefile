@@ -175,6 +175,8 @@ run: iso
 		-drive if=pflash,format=raw,file=OVMF_VARS.fd \
 		-drive format=raw,file=$(BUILD)/fat.img \
 		-m 256M
+		-full-screen
+		-display gtk,gl=on
 
 # Быстрая проверка синтаксиса всех .c без реальной сборки.
 check:

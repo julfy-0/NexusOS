@@ -12,6 +12,18 @@ void console_print(const char *s);
 void console_print_hex(uint64_t value);
 void console_print_dec(uint64_t value);
 
+/* Строка состояния в духе классического Linux-boot: печатает текущей
+ * позицией курсора выровненный к правому краю экрана статус вида
+ * "[ OK ]" / "[FAIL]" / "[WARN]" и переводит строку. Использование:
+ *   console_print("Кусок текста без \\n");
+ *   <сделать шаг>
+ *   console_status_ok();   // или _fail() / _warn()
+ * Если текст слева уже длиннее доступного места — просто печатает
+ * статус сразу после текста (без попытки обрезать или сломать строку). */
+void console_status_ok(void);
+void console_status_fail(void);
+void console_status_warn(void);
+
 /* Scrollback (PgUp/PgDn). delta в строках: положительный — листать назад
  * (к старым строкам), отрицательный — вперёд (к живому выводу). Любая
  * новая печать через console_putchar() сама возвращает к живому виду —

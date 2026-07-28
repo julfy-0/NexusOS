@@ -39,10 +39,6 @@ static void print_banner(nexus_boot_info_t *bi) {
     console_print(" entries, ");
     console_print_dec(bi->mmap.map_size);
     console_print(" bytes total\n\n");
-
-    console_set_color(COLOR_CYAN, COLOR_BLACK);
-    console_print("GDT ... ");
-    console_set_color(COLOR_WHITE, COLOR_BLACK);
 }
 
 void kmain(nexus_boot_info_t *boot_info) {
@@ -56,64 +52,52 @@ void kmain(nexus_boot_info_t *boot_info) {
     }
 
     print_banner(boot_info);
-    console_print("OK\n");
 
     kstate_set_boot_info(boot_info);
 
-    console_set_color(COLOR_CYAN, COLOR_BLACK);
-    console_print("GDT loading ... ");
+    console_print("Loading GDT");
     gdt_init();
-    console_set_color(COLOR_WHITE, COLOR_BLACK);
-    console_print("OK\n");
+    console_status_ok();
 
-    console_set_color(COLOR_CYAN, COLOR_BLACK);
-    console_print("IDT + exception handlers ... ");
+    console_print("Installing IDT and exception handlers");
     idt_init();
-    console_set_color(COLOR_WHITE, COLOR_BLACK);
-    console_print("OK\n");
+    console_status_ok();
 
-    console_set_color(COLOR_CYAN, COLOR_BLACK);
-    console_print("Paging (own PML4/PDPT/PD, identity map) ... ");
+    console_print("Setting up paging (own PML4/PDPT/PD, identity map)");
     paging_init(boot_info);
-    console_set_color(COLOR_WHITE, COLOR_BLACK);
-    console_print("OK\n");
+    console_status_ok();
 
-    console_set_color(COLOR_CYAN, COLOR_BLACK);
-    console_print("PIC remap (IRQ0-15 -> vectors 32-47) ... ");
+    console_print("Remapping PIC (IRQ0-15 -> vectors 32-47)");
     pic_remap();
+    console_status_ok();
 
-    console_set_color(COLOR_CYAN, COLOR_BLACK);
-    console_print("PIT timer (100 Hz) ... ");
+    console_print("Starting PIT timer (100 Hz)");
     pit_init(100);
-    console_set_color(COLOR_WHITE, COLOR_BLACK);
-    console_print("OK\n");
+    console_status_ok();
 
-    console_set_color(COLOR_CYAN, COLOR_BLACK);
-    console_print("Keyboard controller (i8042 init) ... ");
+    console_print("Initializing keyboard controller (i8042)");
     keyboard_init();
-    console_set_color(COLOR_WHITE, COLOR_BLACK);
-    console_print("OK\n");
+    console_status_ok();
 
     /* Разрешаем таймер (IRQ0) и клавиатуру (IRQ1), остальное пока маскируем */
     for (int i = 0; i < 16; i++) pic_set_mask(i, i != 0 && i != 1);
-    console_set_color(COLOR_WHITE, COLOR_BLACK);
-    console_print("OK\n\n");
+    console_print("Unmasking timer and keyboard IRQs");
+    console_status_ok();
 
-    console_set_color(COLOR_CYAN, COLOR_BLACK);
-    console_print("AHCI disk (SATA, port 0, LBA 0) ... ");
+    console_print("\n");
+    console_print("Probing AHCI disk (SATA, port 0, LBA 0)");
     if (ahci_init() && fat32_mount(0)) {
-        console_set_color(COLOR_GREEN, COLOR_BLACK);
-        console_print("OK (FAT32 mounted, try 'diskls')\n");
+        console_status_ok();
+        console_set_color(COLOR_CYAN, COLOR_BLACK);
+        console_print("  -> FAT32 mounted, try 'diskls'\n");
+        console_set_color(COLOR_WHITE, COLOR_BLACK);
     } else {
+        console_status_warn();
         console_set_color(COLOR_YELLOW, COLOR_BLACK);
-        console_print("not found (diskls/diskcat won't work, everything else is fine)\n");
+        console_print("  -> no disk found, diskls/diskcat won't work, everything else is fine\n");
+        console_set_color(COLOR_WHITE, COLOR_BLACK);
     }
-    console_set_color(COLOR_WHITE, COLOR_BLACK);
     console_print("\n");
-
-    console_set_color(COLOR_YELLOW, COLOR_BLACK);
-    console_print("\n");
-    console_set_color(COLOR_WHITE, COLOR_BLACK);
 
     shell_init();
 
