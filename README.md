@@ -10,15 +10,15 @@ AHCI + FAT32 storage support, graphical desktop, and a built-in shell.
 ## 🌍 Languages
 
 - 🇬🇧 **Read in English:** [English](README.md)
-- 🇷🇺 **Читать на русском:** [Русский](README_RU.md)
-- 🇺🇦 **Читати українською:** [Українська](README_UA.md)
-- 🇩🇪 **Auf Deutsch lesen:** [Deutsch](README_DE.md)
-- 🇪🇸 **Leer en español:** [Español](README_ES.md)
-- 🇫🇷 **Lire en français:** [Français](README_FR.md)
-- 🇵🇱 **Czytaj po polsku:** [Polski](README_PL.md)
-- 🇨🇿 **Číst v češtině:** [Čeština](README_CS.md)
-- 🇨🇳 **阅读中文版：** [中文](README_ZH.md)
-- 🇯🇵 **日本語で読む：** [日本語](README_JA.md)
+- 🇷🇺 **Читать на русском:** [Русский](docs/i18n/README.ru.md)
+- 🇺🇦 **Читати українською:** [Українська](docs/i18n/README.ua.md)
+- 🇩🇪 **Auf Deutsch lesen:** [Deutsch](docs/i18n/README.de.md)
+- 🇪🇸 **Leer en español:** [Español](docs/i18n/README.es.md)
+- 🇫🇷 **Lire en français:** [Français](docs/i18n/README.fr.md)
+- 🇵🇱 **Czytaj po polsku:** [Polski](docs/i18n/README.pl.md)
+- 🇨🇿 **Číst v češtině:** [Čeština](docs/i18n/README.cs.md)
+- 🇨🇳 **阅读中文版:** [中文](docs/i18n/README.zh.md)
+- 🇯🇵 **日本語で読む:** [日本語](docs/i18n/README.ja.md)
 
 ---
 
