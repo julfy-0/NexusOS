@@ -2,6 +2,7 @@
  * Достаточно для интерактивной демонстрации — печатаем то, что набрали. */
 #include "keyboard.h"
 #include "shell.h"
+#include "gui.h"
 #include "console.h"
 #include "pic.h"
 #include "io.h"
@@ -140,26 +141,28 @@ void keyboard_handle_irq(void) {
     if (extended_prefix) {
         extended_prefix = 0;
 
+        if (gui_is_active()) {
+            if (sc == SC_ARROW_UP) {
+                (void)gui_handle_key(GUI_KEY_UP);
+            } else if (sc == SC_ARROW_DOWN) {
+                (void)gui_handle_key(GUI_KEY_DOWN);
+            } else if (sc == 0x4B) {
+                (void)gui_handle_key(GUI_KEY_LEFT);
+            } else if (sc == 0x4D) {
+                (void)gui_handle_key(GUI_KEY_RIGHT);
+            }
+            return;
+        }
+
         if (sc == SC_PAGE_UP) {
-            /* Листаем назад (к старым строкам) на одну строку за нажатие.
-             * PS/2-контроллер сам шлёт повторные make-коды, пока клавиша
-             * зажата (typematic repeat) — так что удержание само по себе
-             * даёт быстрый непрерывный скролл, без доп. логики здесь. */
             console_scroll(1);
         } else if (sc == SC_PAGE_DOWN) {
-            /* Листаем вперёд (к живому выводу) на одну строку за нажатие. */
             console_scroll(-1);
         } else if (sc == SC_ARROW_UP) {
-            /* Стрелка вверх — предыдущая команда из истории шелла. */
             shell_history_prev();
         } else if (sc == SC_ARROW_DOWN) {
-            /* Стрелка вниз — следующая команда из истории (или назад к
-             * тому, что печаталось до начала пролистывания). */
             shell_history_next();
         }
-        /* Break-коды (сама клавиша | 0x80) и прочие extended-клавиши
-         * (Home/End, Left/Right, ...) пока осознанно игнорируем — не наша
-         * задача сейчас, шелл всё равно однострочный. */
         return;
     }
 
@@ -180,6 +183,14 @@ void keyboard_handle_irq(void) {
 
     char c = shift_down ? scancode_ascii_shift[sc] : scancode_ascii[sc];
     if (c != 0) {
-        shell_input_char(c);
+        int was_gui = gui_is_active();
+        if (was_gui) {
+            (void)gui_handle_key(c);
+            if (was_gui && !gui_is_active()) {
+                shell_return_from_desktop();
+            }
+        } else {
+            shell_input_char(c);
+        }
     }
 }

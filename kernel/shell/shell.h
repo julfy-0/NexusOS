@@ -8,6 +8,9 @@ void shell_init(void);
  * разбором команд по Enter. */
 void shell_input_char(char c);
 
+/* Restore the command line after the graphical desktop exits. */
+void shell_return_from_desktop(void);
+
 /* Вызываются драйвером клавиатуры по стрелкам Вверх/Вниз — листают историю
  * команд прямо в строке ввода (как в обычных шеллах: bash, PowerShell и т.п.). */
 void shell_history_prev(void);

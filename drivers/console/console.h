@@ -29,6 +29,7 @@ void console_status_warn(void);
  * новая печать через console_putchar() сама возвращает к живому виду —
  * вызывающему (клавиатуре) не нужно об этом заботиться. */
 void console_scroll(int32_t delta);
+uint32_t console_get_cols(void);
 uint32_t console_get_rows(void);
 
 /* Готовые цвета в формате 0x00RRGGBB (конвертация под пиксельный формат

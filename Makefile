@@ -23,7 +23,7 @@ ISODIR  := iso
 
 INCLUDES := -Iinclude/nexus -Iarch/x86_64 -Ikernel -Ikernel/shell -Ikernel/shell/apps \
             -Idrivers/console -Idrivers/cpu -Idrivers/keyboard -Idrivers/pic -Idrivers/timer \
-            -Idrivers/storage -Ifs -Imm
+            -Idrivers/storage -Idrivers/usb -Idrivers/mouse -Ifs -Imm -Ikernel/gui -Ikernel/usermode -Iplatform/target
 
 # --- Загрузчик: freestanding PE32+/EFI, MS x64 ABI ---
 CFLAGS_EFI  := -ffreestanding -fno-stack-protector -fno-stack-check \
@@ -50,7 +50,7 @@ $(BUILD):
 
 BOOT_OBJS := $(BUILD)/boot.o $(BUILD)/mem_efi.o
 
-$(BUILD)/boot.o: boot/efi/boot.c boot/efi/efi.h boot/efi/elf.h include/nexus/boot_info.h | $(BUILD)
+$(BUILD)/boot.o: boot/efi/boot.c boot/efi/efi.h boot/efi/elf.h boot/efi/nexus_logo.h include/nexus/boot_info.h | $(BUILD)
 	$(CC) $(CFLAGS_EFI) boot/efi/boot.c -o $@
 
 $(BUILD)/mem_efi.o: lib/mem.c | $(BUILD)
@@ -65,11 +65,11 @@ bootloader: $(BOOT_OBJS)
 CORE_OBJS := $(BUILD)/entry.o $(BUILD)/kernel.o \
              $(BUILD)/gdt.o $(BUILD)/gdt_asm.o $(BUILD)/idt.o $(BUILD)/isr.o \
              $(BUILD)/paging.o \
-             $(BUILD)/kstate.o $(BUILD)/mem_kernel.o
+             $(BUILD)/kstate.o $(BUILD)/mem_kernel.o $(BUILD)/panic.o $(BUILD)/gui.o $(BUILD)/usermode.o $(BUILD)/target.o $(BUILD)/mount_table.o $(BUILD)/fs_registry.o
 
 FS_OBJS := $(BUILD)/pci.o $(BUILD)/ahci.o $(BUILD)/fat32.o
 
-DRIVER_OBJS := $(BUILD)/console.o $(BUILD)/pic.o $(BUILD)/cpu.o $(BUILD)/keyboard.o $(BUILD)/pit.o
+DRIVER_OBJS := $(BUILD)/console.o $(BUILD)/pic.o $(BUILD)/cpu.o $(BUILD)/keyboard.o $(BUILD)/pit.o $(BUILD)/xhci.o $(BUILD)/mouse.o
 
 APP_NAMES := vfs neofetch sysinfo meminfo about whoami version date echo reverse len \
              upper lower title calc sum hex dec isprime fib \
@@ -77,7 +77,7 @@ APP_NAMES := vfs neofetch sysinfo meminfo about whoami version date echo reverse
              cat less head tail grep diff find \
              write append wc df du colors beep \
              reboot halt shutdown uname man \
-             lspci uptime diskls diskcat
+             lspci uptime diskls diskcat hardware
 
 SHELL_OBJS := $(BUILD)/shell.o $(patsubst %,$(BUILD)/%.o,$(APP_NAMES))
 
@@ -111,8 +111,21 @@ $(BUILD)/kernel.o: kernel/kernel.c | $(BUILD)
 $(BUILD)/kstate.o: kernel/kstate.c kernel/kstate.h | $(BUILD)
 	$(CC) $(CFLAGS_KERNEL) kernel/kstate.c -o $@
 
+$(BUILD)/panic.o: kernel/panic.c kernel/panic.h | $(BUILD)
+	$(CC) $(CFLAGS_KERNEL) kernel/panic.c -o $@
+
 $(BUILD)/mem_kernel.o: lib/mem.c | $(BUILD)
 	$(CC) $(CFLAGS_KERNEL) lib/mem.c -o $@
+
+$(BUILD)/gui.o: kernel/gui/gui.c kernel/gui/gui.h drivers/mouse/mouse.h | $(BUILD)
+	$(CC) $(CFLAGS_KERNEL) kernel/gui/gui.c -o $@
+
+$(BUILD)/usermode.o: kernel/usermode/usermode.c kernel/usermode/usermode.h | $(BUILD)
+	$(CC) $(CFLAGS_KERNEL) kernel/usermode/usermode.c -o $@
+
+$(BUILD)/target.o: platform/target/target.c platform/target/target.h | $(BUILD)
+	$(CC) $(CFLAGS_KERNEL) platform/target/target.c -o $@
+
 
 $(BUILD)/shell.o: kernel/shell/shell.c kernel/shell/shell.h | $(BUILD)
 	$(CC) $(CFLAGS_KERNEL) kernel/shell/shell.c -o $@
@@ -149,6 +162,12 @@ $(BUILD)/cpu.o: drivers/cpu/cpu.c | $(BUILD)
 $(BUILD)/keyboard.o: drivers/keyboard/keyboard.c drivers/keyboard/keyboard.h | $(BUILD)
 	$(CC) $(CFLAGS_KERNEL) drivers/keyboard/keyboard.c -o $@
 
+$(BUILD)/xhci.o: drivers/usb/xhci.c drivers/usb/xhci.h drivers/storage/pci.h | $(BUILD)
+	$(CC) $(CFLAGS_KERNEL) drivers/usb/xhci.c -o $@
+
+$(BUILD)/mouse.o: drivers/mouse/mouse.c drivers/mouse/mouse.h | $(BUILD)
+	$(CC) $(CFLAGS_KERNEL) drivers/mouse/mouse.c -o $@
+
 kernel: $(KERNEL_OBJS)
 	$(LD) $(LDFLAGS_KERNEL) -o $(BUILD)/kernel.elf $(KERNEL_OBJS)
 	@echo "==> Ядро собрано: $(BUILD)/kernel.elf"
@@ -174,8 +193,9 @@ run: iso
 		-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
 		-drive if=pflash,format=raw,file=OVMF_VARS.fd \
 		-drive format=raw,file=$(BUILD)/fat.img \
-		-m 256M
-		-full-screen
+		-m 256M \
+		-full-screen \
+		-device qemu-xhci,id=xhci \
 		-display gtk,gl=on
 
 # Быстрая проверка синтаксиса всех .c без реальной сборки.
@@ -187,3 +207,9 @@ check:
 
 clean:
 	rm -rf $(BUILD) $(ISODIR)
+
+$(BUILD)/mount_table.o: kernel/vfs/mount/mount.c kernel/vfs/mount/mount.h | $(BUILD)
+	$(CC) $(CFLAGS_KERNEL) kernel/vfs/mount/mount.c -o $@
+
+$(BUILD)/fs_registry.o: kernel/vfs/fs/fs.c kernel/vfs/fs/fs.h | $(BUILD)
+	$(CC) $(CFLAGS_KERNEL) kernel/vfs/fs/fs.c -o $@

@@ -11,6 +11,8 @@
 #include "efi.h"
 #include "elf.h"
 #include "boot_info.h"
+#include "nexus_version.h"
+#include "nexus_logo.h"
 
 extern void *memcpy(void *dest, const void *src, unsigned long n);
 extern void *memset(void *dest, int value, unsigned long n);
@@ -22,17 +24,88 @@ static void print(CHAR16 *str) {
     g_st->ConOut->OutputString(g_st->ConOut, str);
 }
 
-static void print_hex(uint64_t value) {
-    CHAR16 buf[19];
-    const CHAR16 *digits = u"0123456789ABCDEF";
-    buf[0] = u'0';
-    buf[1] = u'x';
-    buf[18] = 0;
-    for (int i = 0; i < 16; i++) {
-        buf[17 - i] = digits[value & 0xF];
-        value >>= 4;
+
+
+/* Modern graphical NexusOS boot screen.
+ * Uses UEFI GOP directly, so every element is positioned in pixels and
+ * automatically stays centered at any screen resolution. */
+static EFI_GRAPHICS_OUTPUT_PROTOCOL *g_gop = NULL;
+static UINTN g_width = 0, g_height = 0, g_stride = 0;
+static UINTN g_progress_y = 0;
+
+static uint32_t pixel_value(uint8_t r, uint8_t g, uint8_t b) {
+    if (g_gop->Mode->Info->PixelFormat == PixelRedGreenBlueReserved8BitPerColor)
+        return ((uint32_t)b << 16) | ((uint32_t)g << 8) | r;
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+}
+
+static void put_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
+    if (x < 0 || y < 0 || (UINTN)x >= g_width || (UINTN)y >= g_height) return;
+    volatile uint32_t *fb = (volatile uint32_t *)(uintptr_t)g_gop->Mode->FrameBufferBase;
+    fb[(UINTN)y * g_stride + (UINTN)x] = pixel_value(r, g, b);
+}
+
+static void fill_rect(int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b) {
+    for (int yy = 0; yy < h; ++yy)
+        for (int xx = 0; xx < w; ++xx)
+            put_pixel(x + xx, y + yy, r, g, b);
+}
+
+static void clear_black(void) {
+    fill_rect(0, 0, (int)g_width, (int)g_height, 0, 0, 0);
+}
+
+/* Draw the supplied NexusOS logo from its embedded RGB565 RLE asset. */
+static void draw_logo(void) {
+    int x = ((int)g_width - NEXUS_LOGO_WIDTH) / 2;
+    int y = ((int)g_height - NEXUS_LOGO_HEIGHT) / 2 - 20;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+
+    int px_index = 0;
+    for (UINTN i = 0; i < NEXUS_LOGO_RUNS; ++i) {
+        UINTN count = nexus_logo_rle[i][0];
+        uint16_t color = nexus_logo_rle[i][1];
+        for (UINTN j = 0; j < count; ++j) {
+            int local_x = px_index % NEXUS_LOGO_WIDTH;
+            int local_y = px_index / NEXUS_LOGO_WIDTH;
+            if (local_y >= NEXUS_LOGO_HEIGHT) break;
+            uint16_t p = color;
+            uint8_t r = (uint8_t)(((p >> 11) & 0x1F) * 255 / 31);
+            uint8_t g = (uint8_t)(((p >> 5) & 0x3F) * 255 / 63);
+            uint8_t b = (uint8_t)((p & 0x1F) * 255 / 31);
+            put_pixel(x + local_x, y + local_y, r, g, b);
+            ++px_index;
+        }
     }
-    print(buf);
+    g_progress_y = y + NEXUS_LOGO_HEIGHT + (int)(g_height / 14);
+}
+
+static void boot_graphics_init(EFI_GRAPHICS_OUTPUT_PROTOCOL *gop) {
+    g_gop = gop;
+    g_width = gop->Mode->Info->HorizontalResolution;
+    g_height = gop->Mode->Info->VerticalResolution;
+    g_stride = gop->Mode->Info->PixelsPerScanLine;
+    clear_black();
+    draw_logo();
+}
+
+static void boot_progress(UINTN current, UINTN total, CHAR16 *label) {
+    (void)label;
+    if (!g_gop || !total) return;
+    int bar_w = (int)(g_width * 38 / 100);
+    if (bar_w < 220) bar_w = 220;
+    if ((UINTN)bar_w > g_width - 40) bar_w = (int)g_width - 40;
+    int bar_h = (int)(g_height / 90); if (bar_h < 8) bar_h = 8; if (bar_h > 20) bar_h = 20;
+    int x = ((int)g_width - bar_w) / 2;
+    int y = (int)g_progress_y;
+    int filled = (int)((current * (UINTN)bar_w) / total);
+    fill_rect(x, y, bar_w, bar_h, 42, 42, 42);
+    for (int xx=0; xx<filled; ++xx) {
+        uint8_t v = (uint8_t)(255 - (xx * 120 / (bar_w ? bar_w : 1)));
+        fill_rect(x+xx, y, 1, bar_h, v, v, v);
+    }
+    if (g_bs) g_bs->Stall(80000);
 }
 
 static void panic(CHAR16 *msg) {
@@ -124,19 +197,135 @@ static uint64_t load_elf(void *elf_data) {
     return eh->e_entry;
 }
 
+
+static int guid_equal(const EFI_GUID *a, const EFI_GUID *b) {
+    return a->Data1 == b->Data1 && a->Data2 == b->Data2 &&
+           a->Data3 == b->Data3 &&
+           a->Data4[0] == b->Data4[0] && a->Data4[1] == b->Data4[1] &&
+           a->Data4[2] == b->Data4[2] && a->Data4[3] == b->Data4[3] &&
+           a->Data4[4] == b->Data4[4] && a->Data4[5] == b->Data4[5] &&
+           a->Data4[6] == b->Data4[6] && a->Data4[7] == b->Data4[7];
+}
+
+static int ascii_copy_smbios_string(uint8_t *table, uint8_t *end,
+                                    uint8_t wanted_index, char *out, UINTN out_size) {
+    if (!wanted_index || !out || out_size == 0) return 0;
+    uint8_t *p = table;
+    uint8_t index = 1;
+    while (p < end && *p) {
+        if (index == wanted_index) {
+            UINTN n = 0;
+            while (p < end && *p && n + 1 < out_size) out[n++] = (char)*p++;
+            out[n] = '\0';
+            return n != 0;
+        }
+        while (p < end && *p) p++;
+        if (p < end) p++;
+        index++;
+    }
+    out[0] = '\0';
+    return 0;
+}
+
+static void detect_acpi(nexus_boot_info_t *bi) {
+    bi->acpi_valid = 0;
+    bi->acpi_revision = 0;
+    bi->acpi_rsdp = 0;
+    if (!g_st || !g_st->ConfigurationTable || !g_st->NumberOfTableEntries) return;
+
+    /* ACPI 2.0+ and ACPI 1.0 EFI configuration table GUIDs. */
+    EFI_GUID acpi20 = {0x8868E871,0xE4F1,0x11D3,{0xBC,0x22,0x00,0x80,0xC7,0x3C,0x88,0x81}};
+    EFI_GUID acpi10 = {0xEB9D2D30,0x2D88,0x11D3,{0x9A,0x16,0x00,0x90,0x27,0x3F,0xC1,0x4D}};
+    EFI_CONFIGURATION_TABLE *tables = (EFI_CONFIGURATION_TABLE *)g_st->ConfigurationTable;
+
+    /* Prefer ACPI 2.0+ when both entries are present. */
+    for (int pass = 0; pass < 2; ++pass) {
+        for (UINTN i = 0; i < g_st->NumberOfTableEntries; ++i) {
+            EFI_GUID *wanted = pass == 0 ? &acpi20 : &acpi10;
+            if (!guid_equal(&tables[i].VendorGuid, wanted)) continue;
+            uint8_t *rsdp = (uint8_t *)tables[i].VendorTable;
+            if (!rsdp) continue;
+            if (rsdp[0]=='R' && rsdp[1]=='S' && rsdp[2]=='D' && rsdp[3]==' ' &&
+                rsdp[4]=='P' && rsdp[5]=='T' && rsdp[6]=='R' && rsdp[7]==' ') {
+                bi->acpi_valid = 1;
+                bi->acpi_revision = rsdp[15];
+                bi->acpi_rsdp = (uint64_t)(uintptr_t)rsdp;
+                return;
+            }
+        }
+    }
+}
+
+static void detect_system_identity(nexus_boot_info_t *bi) {
+    bi->system_info_valid = 0;
+    bi->system_manufacturer[0] = '\0';
+    bi->system_product[0] = '\0';
+    if (!g_st || !g_st->ConfigurationTable || !g_st->NumberOfTableEntries) return;
+
+    /* SMBIOS 2.x and 3.x EFI configuration table GUIDs. */
+    EFI_GUID smbios2 = {0xEB9D2D31,0x2D88,0x11D3,{0x9A,0x16,0x00,0x90,0x27,0x3F,0xC1,0x4D}};
+    EFI_GUID smbios3 = {0xF2FD1544,0x9794,0x4A2C,{0x99,0x2E,0xE5,0xBB,0xCF,0x20,0xE3,0x94}};
+    EFI_CONFIGURATION_TABLE *tables = (EFI_CONFIGURATION_TABLE *)g_st->ConfigurationTable;
+    uint8_t *table = NULL;
+    UINTN table_len = 0;
+
+    for (UINTN i = 0; i < g_st->NumberOfTableEntries; i++) {
+        if (guid_equal(&tables[i].VendorGuid, &smbios2) ||
+            guid_equal(&tables[i].VendorGuid, &smbios3)) {
+            uint8_t *ep = (uint8_t *)tables[i].VendorTable;
+            if (!ep) continue;
+            if (ep[0]=='_' && ep[1]=='S' && ep[2]=='M' && ep[3]=='_' && ep[5] >= 0x1F) {
+                uint16_t len = *(uint16_t *)(ep + 22);
+                uint32_t addr = *(uint32_t *)(ep + 24);
+                table = (uint8_t *)(uintptr_t)addr;
+                table_len = len;
+                break;
+            }
+            if (ep[0]=='_' && ep[1]=='S' && ep[2]=='M' && ep[3]=='3' && ep[4]=='_') {
+                uint32_t maxlen = *(uint32_t *)(ep + 16);
+                uint64_t addr = *(uint64_t *)(ep + 20);
+                table = (uint8_t *)(uintptr_t)addr;
+                table_len = maxlen;
+                break;
+            }
+        }
+    }
+    if (!table || table_len < 4) return;
+
+    uint8_t *end = table + table_len;
+    for (uint8_t *p = table; p + 4 <= end; ) {
+        uint8_t type = p[0];
+        uint8_t len = p[1];
+        if (len < 4 || p + len > end) break;
+        if (type == 1) { /* System Information */
+            uint8_t manufacturer = p[4];
+            uint8_t product = p[5];
+            uint8_t *strings = p + len;
+            if (ascii_copy_smbios_string(strings, end, manufacturer,
+                                          bi->system_manufacturer, sizeof(bi->system_manufacturer)) ||
+                ascii_copy_smbios_string(strings, end, product,
+                                          bi->system_product, sizeof(bi->system_product))) {
+                bi->system_info_valid = 1;
+            }
+            return;
+        }
+        uint8_t *q = p + len;
+        while (q + 1 < end && !(q[0] == 0 && q[1] == 0)) q++;
+        if (q + 1 >= end) break;
+        p = q + 2;
+    }
+}
+
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     g_st = SystemTable;
     g_bs = SystemTable->BootServices;
 
-    g_st->ConOut->ClearScreen(g_st->ConOut);
-    g_st->ConOut->SetAttribute(g_st->ConOut, EFI_LIGHTGREEN | EFI_BACKGROUND_BLACK);
-    print(u"NexusOS Bootloader v0.2\r\n");
-    g_st->ConOut->SetAttribute(g_st->ConOut, EFI_WHITE | EFI_BACKGROUND_BLACK);
-    print(u"========================\r\n\r\n");
 
     static nexus_boot_info_t boot_info;
     memset(&boot_info, 0, sizeof(boot_info));
     boot_info.magic = NEXUS_BOOT_MAGIC;
+    detect_system_identity(&boot_info);
+    detect_acpi(&boot_info);
 
     /* ---- 1. Видеорежим через GOP ---- */
     EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
@@ -160,13 +349,14 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
         boot_info.fb.pixel_format = NEXUS_PIXFMT_OTHER;
     }
 
-    print(u"Framebuffer: ");
-    print_hex(boot_info.fb.width);
-    print(u" x ");
-    print_hex(boot_info.fb.height);
-    print(u" @ ");
-    print_hex(boot_info.fb.base);
-    print(u"\r\n");
+    if (boot_info.fb.pixel_format == NEXUS_PIXFMT_OTHER) {
+        panic(u"Unsupported framebuffer pixel format");
+    }
+
+    boot_graphics_init(gop);
+    boot_progress(1, 7, u"");
+
+    boot_progress(2, 7, u"Opening boot volume");
 
     /* ---- 2. Открываем том, с которого загрузились, и читаем kernel.elf ---- */
     EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
@@ -189,17 +379,14 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
         panic(u"OpenVolume failed");
     }
 
-    print(u"Loading \\kernel.elf ...\r\n");
+    boot_progress(3, 7, u"Loading kernel image");
     UINTN kernel_size;
     void *kernel_data = load_file(root, u"\\kernel.elf", &kernel_size);
-    print(u"Kernel file loaded, size = ");
-    print_hex(kernel_size);
-    print(u" bytes\r\n");
 
+    boot_progress(4, 7, u"Preparing kernel memory");
     uint64_t entry_point = load_elf(kernel_data);
-    print(u"Kernel entry point: ");
-    print_hex(entry_point);
-    print(u"\r\n");
+
+    boot_progress(5, 7, u"Finalizing memory map");
 
     /* ---- 3. Финальная memory map + ExitBootServices ---- */
     UINTN mmap_size = 0;
@@ -223,7 +410,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     boot_info.mmap.descriptor_size = desc_size;
     boot_info.mmap.descriptor_version = desc_version;
 
-    print(u"Exiting boot services...\r\n");
+    boot_progress(7, 7, u"Starting NexusOS 0.5.0 - Enstein");
     status = g_bs->ExitBootServices(ImageHandle, map_key);
     if (EFI_ERROR(status)) {
         /* Карта могла устареть между вызовами (это нормально по спеке) —

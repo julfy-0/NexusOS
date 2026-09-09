@@ -6,6 +6,10 @@
 
 #define PTE_PRESENT  0x001ULL
 #define PTE_WRITABLE 0x002ULL
+#define PTE_PCD      0x010ULL /* Page Cache Disable — обязателен для MMIO: без него запись
+                                * в регистр (например xHCI doorbell) может осесть в write-back
+                                * кэше и никогда не дойти до устройства. */
+#define PTE_PWT      0x008ULL
 #define PTE_HUGE     0x080ULL /* PS-бит: в PD-таблице значит "это 2 MiB страница, а не указатель на PT" */
 
 #define ENTRIES_PER_TABLE 512
@@ -23,7 +27,7 @@
 /* Доп. PD-таблицы для 1 GiB-слотов ВНЕ базового диапазона — нужны,
  * если что-то (обычно framebuffer, реже сама EFI memory map) лежит
  * выше BASE_IDENTITY_GIB. Каждая таблица покрывает один 1 GiB слот. */
-#define EXTRA_PD_SLOTS 8
+#define EXTRA_PD_SLOTS 512
 
 static uint64_t pml4[ENTRIES_PER_TABLE] __attribute__((aligned(4096)));
 static uint64_t pdpt[ENTRIES_PER_TABLE] __attribute__((aligned(4096)));
@@ -41,10 +45,9 @@ static void zero_table(uint64_t *t) {
 
 /* Находит (или заводит, если это первый вызов для данного 1 GiB слота)
  * PD-таблицу, отвечающую за 2 MiB страницу по физическому адресу phys.
- * Возвращает NULL, если это вне базового диапазона и пул extra-слотов
- * уже исчерпан — вызывающий код должен пропустить эту страницу
- * (best-effort: базового диапазона + framebuffer в подавляющем
- * большинстве конфигураций достаточно). */
+ * Пул покрывает все 512 PDPT-слотов (первые 512 GiB). На реальном
+ * оборудовании нельзя silently пропускать регион: после загрузки CR3 это
+ * приводит к page fault и часто к triple fault/мгновенному reboot. */
 static uint64_t *pd_table_for(uint64_t phys) {
     uint64_t pdpt_idx = (phys / PAGE_1G) & 0x1FF;
 
@@ -64,7 +67,9 @@ static uint64_t *pd_table_for(uint64_t phys) {
     }
 
     if (extra_slots_used >= EXTRA_PD_SLOTS) {
-        return NULL; /* пул исчерпан — см. комментарий выше */
+        /* Адрес выше первых 512 GiB пока не поддержан. Не молча: CR3
+         * переключаем только после построения полной поддерживаемой карты. */
+        return NULL;
     }
 
     int slot = extra_slots_used++;
@@ -75,24 +80,24 @@ static uint64_t *pd_table_for(uint64_t phys) {
 }
 
 /* Мапит одну 2 MiB страницу identity (phys должен быть выровнен на 2 MiB). */
-static void map_2m_page(uint64_t phys) {
+static void map_2m_page(uint64_t phys, uint64_t extra_flags) {
     uint64_t *pd = pd_table_for(phys);
-    if (pd == NULL) return; /* best-effort, см. pd_table_for() */
+    if (pd == NULL) return;
 
     uint64_t pd_idx = (phys / PAGE_2M) & 0x1FF;
-    pd[pd_idx] = phys | PTE_PRESENT | PTE_WRITABLE | PTE_HUGE;
+    pd[pd_idx] = phys | PTE_PRESENT | PTE_WRITABLE | PTE_HUGE | extra_flags;
 }
 
 /* Мапит диапазон [start, end) 2 MiB страницами, округляя границы наружу
  * до ближайшей 2 MiB-границы, чтобы гарантированно покрыть весь диапазон. */
-static void map_region(uint64_t start, uint64_t end) {
+static void map_region(uint64_t start, uint64_t end, uint64_t extra_flags) {
     if (end <= start) return;
 
     uint64_t aligned_start = start & ~(PAGE_2M - 1);
     uint64_t aligned_end = (end + PAGE_2M - 1) & ~(PAGE_2M - 1);
 
     for (uint64_t phys = aligned_start; phys < aligned_end; phys += PAGE_2M) {
-        map_2m_page(phys);
+        map_2m_page(phys, extra_flags);
     }
 }
 
@@ -111,7 +116,7 @@ void paging_init(nexus_boot_info_t *bi) {
      *    сюда попадает сам код ядра (грузится по 0x200000), его стек,
      *    все таблицы, и обычно вся "обычная" RAM у большинства машин,
      *    на которых сейчас тестируемся (QEMU с -m 256M и т.п.). */
-    map_region(0, (uint64_t)BASE_IDENTITY_GIB * PAGE_1G);
+    map_region(0, (uint64_t)BASE_IDENTITY_GIB * PAGE_1G, 0);
 
     /* 2. Проходим по настоящей EFI memory map и мапим КАЖДЫЙ описанный
      *    регион — это покрывает MMIO/reserved/ACPI-регионы, которые
@@ -127,7 +132,7 @@ void paging_init(nexus_boot_info_t *bi) {
             nexus_efi_mmap_entry_t *e = (nexus_efi_mmap_entry_t *)(base + i * stride);
             uint64_t region_start = e->physical_start;
             uint64_t region_end = region_start + e->number_of_pages * 4096ULL;
-            map_region(region_start, region_end);
+            map_region(region_start, region_end, 0);
         }
     }
 
@@ -138,10 +143,15 @@ void paging_init(nexus_boot_info_t *bi) {
      *    первая же попытка что-то напечатать после переключения CR3
      *    ушла бы в page fault. */
     if (bi != NULL && bi->fb.base != 0 && bi->fb.size != 0) {
-        map_region(bi->fb.base, bi->fb.base + bi->fb.size);
+        map_region(bi->fb.base, bi->fb.base + bi->fb.size, 0);
     }
 
     __asm__ volatile ("mov %0, %%cr3" : : "r"((uint64_t)(uintptr_t)pml4) : "memory");
+}
+
+void paging_map_region(uint64_t start, uint64_t end) {
+    /* Всегда некэшируемо: контракт этой функции (см. paging.h) — MMIO BAR'ы. */
+    map_region(start, end, PTE_PCD | PTE_PWT);
 }
 
 uint64_t paging_get_cr3(void) {

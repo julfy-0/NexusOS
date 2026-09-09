@@ -23,6 +23,9 @@ int fat32_mount(uint64_t partition_lba);
 
 int fat32_is_mounted(void);
 
+/* Returns 1 when path exists and is a directory. */
+int fat32_is_directory(const char *path);
+
 /* Печатает содержимое директории path ("/" — корень) через console_print:
  * имя, [DIR] или размер в байтах. Возвращает 1 при успехе, 0 если путь
  * не найден или это не директория. */

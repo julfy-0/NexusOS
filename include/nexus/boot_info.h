@@ -57,6 +57,15 @@ typedef struct {
     uint64_t magic;              /* для проверки, что структура валидна */
     nexus_framebuffer_t fb;
     nexus_memory_map_t mmap;
+
+    /* DMI/SMBIOS strings copied by the UEFI loader before ExitBootServices.
+     * The kernel never dereferences firmware-owned pointers. */
+    uint32_t system_info_valid;
+    uint32_t acpi_valid;
+    uint32_t acpi_revision;
+    uint64_t acpi_rsdp;
+    char system_manufacturer[64];
+    char system_product[96];
 } nexus_boot_info_t;
 
 #define NEXUS_BOOT_MAGIC 0x4E4558555342494EULL /* "NEXUSBIN" */

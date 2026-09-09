@@ -97,3 +97,46 @@ int pci_find_class(uint8_t class_code, uint8_t subclass, uint8_t prog_if, nexus_
     }
     return 0;
 }
+
+static void pci_config_write16(uint8_t bus, uint8_t dev, uint8_t func,
+                               uint8_t offset, uint16_t value) {
+    uint32_t address = (1u << 31) |
+                       ((uint32_t)bus << 16) |
+                       ((uint32_t)dev << 11) |
+                       ((uint32_t)func << 8) |
+                       (offset & 0xFC);
+    outl(PCI_CONFIG_ADDRESS, address);
+    uint32_t old = inl(PCI_CONFIG_DATA);
+    uint32_t shift = (uint32_t)(offset & 2u) * 8u;
+    uint32_t mask = 0xFFFFu << shift;
+    outl(PCI_CONFIG_DATA, (old & ~mask) | ((uint32_t)value << shift));
+}
+
+uint64_t pci_get_bar64(const nexus_pci_device_t *dev, int index) {
+    if (!dev || index < 0 || index >= 6) return 0;
+
+    uint32_t low = pci_config_read32(dev->bus, dev->device, dev->function,
+                                     (uint8_t)(0x10 + index * 4));
+    if (low & 0x1u) return 0; /* I/O BAR */
+
+    uint64_t addr = (uint64_t)(low & 0xFFFFFFF0u);
+    uint32_t type = (low >> 1) & 0x3u;
+    if (type == 0x2u) {
+        if (index >= 5) return 0;
+        uint32_t high = pci_config_read32(dev->bus, dev->device, dev->function,
+                                          (uint8_t)(0x10 + (index + 1) * 4));
+        addr |= (uint64_t)high << 32;
+    } else if (type != 0x0u) {
+        return 0;
+    }
+    return addr;
+}
+
+void pci_enable_device(const nexus_pci_device_t *dev, int memory_space, int bus_master) {
+    if (!dev) return;
+    uint32_t reg = pci_config_read32(dev->bus, dev->device, dev->function, 0x04);
+    uint16_t command = reg & 0xFFFFu;
+    if (memory_space) command |= (1u << 1);
+    if (bus_master) command |= (1u << 2);
+    pci_config_write16(dev->bus, dev->device, dev->function, 0x04, command);
+}

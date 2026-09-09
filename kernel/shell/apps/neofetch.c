@@ -9,6 +9,7 @@
 #include "kstate.h"
 #include "boot_info.h"
 #include "nexus_version.h"
+#include "target.h"
 
 #define LOGO_WIDTH 20
 
@@ -80,10 +81,17 @@ void neofetch_run(void) {
     int row = 0;
 
     print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
-    console_print("OS: NexusOS x86_64\n");
+    console_print("OS: NexusOS " NEXUS_VERSION_DISPLAY " x86_64\n");
 
     print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
-    console_print("Kernel: " NEXUS_VERSION_STRING "\n");
+    console_print("System: ");
+    console_print(target_system_manufacturer());
+    console_print(" ");
+    console_print(target_system_product());
+    console_print("\n");
+
+    print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
+    console_print("Kernel: " NEXUS_VERSION_DISPLAY "\n");
 
     print_padded(logo_line(row++), LOGO_WIDTH, COLOR_GREEN);
     console_print("User: root@nexusos\n");

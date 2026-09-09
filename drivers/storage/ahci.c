@@ -115,7 +115,20 @@ int ahci_init(void) {
         return 0; /* нет AHCI-контроллера на шине */
     }
 
-    uint32_t abar = dev.bar[5] & 0xFFFFFFF0u;
+    /* ABAR может быть 64-битным. Старый код отбрасывал старшие 32 бита
+     * и на современных ПК писал в совершенно другой физический адрес, что
+     * могло закончиться #PF/triple fault и мгновенной перезагрузкой.
+     * Пока PCI-слой хранит BAR только как 32-битные значения, безопасно
+     * работаем лишь с настоящим 32-битным memory BAR. */
+    uint32_t raw_abar = dev.bar[5];
+    if (raw_abar & 0x1u) {
+        return 0; /* I/O BAR, для AHCI не подходит */
+    }
+    if (((raw_abar >> 1) & 0x3u) == 0x2u) {
+        return 0; /* 64-bit BAR: не трогаем, пока не реализован uint64_t PCI BAR */
+    }
+
+    uint64_t abar = (uint64_t)(raw_abar & 0xFFFFFFF0u);
     if (abar == 0) {
         return 0;
     }

@@ -12,34 +12,18 @@
 #include "pic.h"
 #include "kstate.h"
 #include "shell.h"
+#include "vfs/mount/mount.h"
 #include "pit.h"
 #include "pci.h"
 #include "ahci.h"
 #include "fat32.h"
 #include "keyboard.h"
-
-static void print_banner(nexus_boot_info_t *bi) {
-    console_set_color(COLOR_GREEN, COLOR_BLACK);
-    console_print("NexusOS\n");
-    console_set_color(COLOR_WHITE, COLOR_BLACK);
-    console_print("========\n\n");
-
-    console_print("Kernel is alive.\n\n");
-
-    console_print("Framebuffer: ");
-    console_print_dec(bi->fb.width);
-    console_print(" x ");
-    console_print_dec(bi->fb.height);
-    console_print(" @ ");
-    console_print_hex(bi->fb.base);
-    console_print("\n");
-
-    console_print("Memory map: ");
-    console_print_dec(bi->mmap.map_size / bi->mmap.descriptor_size);
-    console_print(" entries, ");
-    console_print_dec(bi->mmap.map_size);
-    console_print(" bytes total\n\n");
-}
+#include "gui.h"
+#include "usermode.h"
+#include "xhci.h"
+#include "mouse.h"
+#include "target.h"
+#include "nexus_version.h"
 
 void kmain(nexus_boot_info_t *boot_info) {
     console_init(&boot_info->fb);
@@ -51,9 +35,12 @@ void kmain(nexus_boot_info_t *boot_info) {
         for (;;) { __asm__ volatile ("cli; hlt"); }
     }
 
-    print_banner(boot_info);
-
     kstate_set_boot_info(boot_info);
+
+    console_set_color(COLOR_CYAN, COLOR_BLACK);
+    console_print("NexusOS " NEXUS_VERSION_DISPLAY "\n");
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
+    console_print("================================\n\n");
 
     console_print("Loading GDT");
     gdt_init();
@@ -80,16 +67,31 @@ void kmain(nexus_boot_info_t *boot_info) {
     console_status_ok();
 
     /* Разрешаем таймер (IRQ0) и клавиатуру (IRQ1), остальное пока маскируем */
-    for (int i = 0; i < 16; i++) pic_set_mask(i, i != 0 && i != 1);
-    console_print("Unmasking timer and keyboard IRQs");
+    for (int i = 0; i < 16; i++) pic_set_mask(i, i != 0 && i != 1 && i != 12);
+    console_print("Unmasking timer, keyboard and mouse IRQs");
     console_status_ok();
 
+    console_print("Initializing PS/2 mouse");
+    mouse_init();
+    if (mouse_is_present()) {
+        console_status_ok();
+        console_print("  -> mouse connected\n");
+    } else {
+        console_status_warn();
+        console_print("  -> no PS/2 mouse found, continuing\n");
+    }
+
     console_print("\n");
+    console_print("Scanning PCI bus");
+    pci_scan();
+    console_status_ok();
+
     console_print("Probing AHCI disk (SATA, port 0, LBA 0)");
     if (ahci_init() && fat32_mount(0)) {
         console_status_ok();
+        vfs_mount("ahci0p0", "/mnt/disk0", "fat32", VFS_MOUNT_RDONLY);
         console_set_color(COLOR_CYAN, COLOR_BLACK);
-        console_print("  -> FAT32 mounted, try 'diskls'\n");
+        console_print("  -> FAT32 mounted at /mnt/disk0, try 'diskls'\n");
         console_set_color(COLOR_WHITE, COLOR_BLACK);
     } else {
         console_status_warn();
@@ -99,11 +101,47 @@ void kmain(nexus_boot_info_t *boot_info) {
     }
     console_print("\n");
 
+    console_print("Initializing USB xHCI controller");
+    if (xhci_init()) {
+        console_status_ok();
+        console_print("  -> USB ports: ");
+        console_print_dec(xhci_port_count());
+        console_print(", connected: ");
+        console_print_dec(xhci_connected_ports());
+        console_print("\n");
+        if (xhci_keyboard_present()) {
+            console_set_color(COLOR_CYAN, COLOR_BLACK);
+            console_print("  -> USB keyboard ready\n");
+            console_set_color(COLOR_WHITE, COLOR_BLACK);
+        }
+    } else {
+        console_status_warn();
+        console_print("  -> no xHCI controller found or initialization failed\n");
+    }
+
+    console_print("Detecting system hardware");
+    console_status_ok();
+    console_print("  -> automatic hardware detection enabled\n");
+    nexus_target_status_t hw;
+    target_get_status(&hw);
+    console_print("  -> PCI network devices: "); console_print_dec(hw.network); console_print("\n");
+    console_print("  -> NVMe controllers: "); console_print_dec(hw.nvme); console_print("\n");
+    console_print("  -> ACPI: "); console_print(hw.acpi ? "available\n" : "not available\n");
+    console_print("\n");
+
+    /*
+     * NexusOS now always enters the command line after driver
+     * initialization. The graphical desktop remains available, but is
+     * launched explicitly by the "desktop-run" shell command.
+     */
     shell_init();
+    usermode_init();
+    gui_init(&boot_info->fb);
 
     __asm__ volatile ("sti");
 
     for (;;) {
+        if (gui_is_active()) gui_update();
         __asm__ volatile ("hlt");
     }
 }

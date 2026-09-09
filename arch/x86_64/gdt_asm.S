@@ -23,4 +23,10 @@ gdt_flush:
 .reload_cs:
     ret
 
+.global gdt_load_tss
+.type gdt_load_tss,@function
+gdt_load_tss:
+    ltr %di
+    ret
+
 .section .note.GNU-stack,"",@progbits

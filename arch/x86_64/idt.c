@@ -8,6 +8,9 @@
 #include "pic.h"
 #include "keyboard.h"
 #include "pit.h"
+#include "panic.h"
+#include "mouse.h"
+#include "xhci.h"
 
 typedef struct {
     uint16_t offset_low;
@@ -119,7 +122,7 @@ static void print_page_fault_details(interrupt_frame_t *f) {
     console_print_hex(f->cs);
     console_print("\n  RFLAGS: ");
     console_print_hex(f->rflags);
-    console_print("\n\n  System halted.\n");
+    console_print("\n");
 }
 
 static void panic_screen(interrupt_frame_t *f) {
@@ -146,15 +149,13 @@ static void panic_screen(interrupt_frame_t *f) {
     console_print_hex(f->cs);
     console_print("\n  RFLAGS: ");
     console_print_hex(f->rflags);
-    console_print("\n\n  System halted.\n");
+    console_print("\n");
 }
 
 void isr_handler(interrupt_frame_t *frame) {
     if (frame->vector < 32) {
         panic_screen(frame);
-        for (;;) {
-            __asm__ volatile ("cli; hlt");
-        }
+        panic_countdown_and_reboot();
     }
 
     /* Аппаратные IRQ (32..47): CPU сам сбрасывает IF на входе в interrupt
@@ -182,8 +183,15 @@ void isr_handler(interrupt_frame_t *frame) {
 
     if (frame->vector == 32) { /* IRQ0 = таймер */
         pit_handle_irq();
+        /* Контроллер xHCI не использует своё аппаратное прерывание (см.
+         * drivers/usb/xhci.h) — event ring опрашивается прямо тут, на
+         * каждый тик таймера (100 Hz), этого достаточно для клавиатуры. */
+        xhci_poll();
     }
     if (frame->vector == 33) { /* IRQ1 = клавиатура */
         keyboard_handle_irq();
+    }
+    if (frame->vector == 44) { /* IRQ12 = PS/2 мышь */
+        mouse_handle_irq();
     }
 }

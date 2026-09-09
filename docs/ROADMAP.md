@@ -11,7 +11,9 @@ descent — импортированный проект принёс "archive" (
 - [x] Перенос всего кода в новую структуру, реальная сборка проверена
 - [x] **Живой бут в QEMU+OVMF подтверждён** — шелл и команды проверены
 
-## Milestone 0.4 — memoria (Virtual Memory) — текущий
+## Milestone 0.4 — memoria (Virtual Memory)
+
+## Milestone 0.5 — Enstein (VFS path traversal) — текущий
 
 Сейчас работает identity-map, оставленный UEFI firmware — это не
 "настоящая" виртуальная память, а просто то, что было до нас.
@@ -68,3 +70,9 @@ descent — импортированный проект принёс "archive" (
 Не по чекбоксам — отдельным ADR, когда реально самодостаточна:
 грузится, многозадачность, ФС, user-space процессы, интерактивный
 шелл (уже есть, но должен переехать в user-space).
+
+## Graphical shell + user mode foundation
+- Graphical framebuffer desktop with centered Nexus OS identity and black theme.
+- Application surface: Files / Terminal / Settings cards; window manager and mouse are next.
+- Ring-3 foundation: user code/data selectors and 64-bit TSS with rsp0.
+- Next: 4 KiB user pages with U/S permission, syscall entry, process object, scheduler, ELF user loader.

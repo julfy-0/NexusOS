@@ -1,0 +1,3 @@
+==> Загрузчик собран: build/BOOTX64.EFI
+==> Ядро собрано: build/kernel.elf
+==> iso/ готов (структура ESP)

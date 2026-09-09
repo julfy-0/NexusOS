@@ -232,6 +232,10 @@ void console_scroll(int32_t delta) {
     console_redraw();
 }
 
+uint32_t console_get_cols(void) {
+    return g_cols;
+}
+
 uint32_t console_get_rows(void) {
     return g_rows;
 }

@@ -1,5 +1,7 @@
 #include "vfs.h"
 #include "console.h"
+#include "../../vfs/mount/mount.h"
+#include "fat32.h"
 
 extern int strcmp(const char *a, const char *b);
 
@@ -19,6 +21,43 @@ typedef struct {
 
 static vfs_node_t g_nodes[VFS_MAX_NODES];
 static int g_cwd; /* индекс текущей директории */
+static char g_cwd_path[256];
+
+static int path_len(const char *s) {
+    int n = 0; while (s[n] != '\0') n++; return n;
+}
+
+static void path_copy(char *dst, const char *src) {
+    int i = 0;
+    while (src[i] != '\0' && i < 255) { dst[i] = src[i]; i++; }
+    dst[i] = '\0';
+}
+
+static int path_is_mount(const char *path, char *mountpoint) {
+    if (vfs_mount_count() <= 0) return 0;
+    return vfs_mount_resolve(path, mountpoint, 256);
+}
+
+static int path_join(char *out, const char *base, const char *name) {
+    int n = 0, i = 0;
+    if (name[0] == '/') { path_copy(out, name); return 0; }
+    while (base[i] && n < 255) out[n++] = base[i++];
+    if (n == 0) out[n++] = '/';
+    if (n > 1 && out[n-1] != '/') out[n++] = '/';
+    i = 0;
+    while (name[i] && n < 255) out[n++] = name[i++];
+    out[n] = '\0';
+    return 0;
+}
+
+static int fat_relative(const char *full, const char *mountpoint, char *out) {
+    int ml = path_len(mountpoint);
+    if (strcmp(full, mountpoint) == 0) { path_copy(out, "/"); return 1; }
+    if (ml > 1 && full[ml] == '/' && strcmp(full, mountpoint) != 0) {
+        path_copy(out, full + ml); return 1;
+    }
+    return 0;
+}
 
 static int local_strlen(const char *s) {
     int n = 0;
@@ -75,9 +114,15 @@ void vfs_init(void) {
     copy_truncate(g_nodes[0].name, "/", VFS_NAME_LEN);
 
     g_cwd = 0;
+    path_copy(g_cwd_path, "/");
+
+    /* Mountpoint directories are namespace entries, not FAT data. */
+    g_nodes[1].type = VFS_NODE_DIR; g_nodes[1].parent = 0; copy_truncate(g_nodes[1].name, "mnt", VFS_NAME_LEN);
+    g_nodes[2].type = VFS_NODE_DIR; g_nodes[2].parent = 1; copy_truncate(g_nodes[2].name, "disk0", VFS_NAME_LEN);
 }
 
 int vfs_mkdir(const char *name) {
+    if (g_cwd < 0) return -1;
     if (name[0] == '\0') return -1;
     if (find_child(g_cwd, name) != -1) return -1;
 
@@ -91,6 +136,7 @@ int vfs_mkdir(const char *name) {
 }
 
 int vfs_touch(const char *name) {
+    if (g_cwd < 0) return -1;
     if (name[0] == '\0') return -1;
     if (find_child(g_cwd, name) != -1) return -1;
 
@@ -106,6 +152,9 @@ int vfs_touch(const char *name) {
 }
 
 int vfs_rm(const char *name) {
+    if (g_cwd < 0) return -1;
+    if ((g_cwd == 0 && strcmp(name, "mnt") == 0) ||
+        (g_cwd == 1 && strcmp(name, "disk0") == 0)) return -1;
     int idx = find_child(g_cwd, name);
     if (idx < 0) return -1;
 
@@ -118,40 +167,87 @@ int vfs_rm(const char *name) {
 }
 
 int vfs_cd(const char *name) {
-    if (strcmp(name, ".") == 0) {
-        return 0;
-    }
+    char candidate[256];
+    char mountpoint[256];
+    char rel[256];
+
+    if (strcmp(name, ".") == 0) return 0;
+
     if (strcmp(name, "..") == 0) {
-        if (g_cwd != 0) {
-            g_cwd = g_nodes[g_cwd].parent;
+        if (g_cwd == 0) return 0;
+        if (g_cwd_path[0] != '/') return -1;
+        int n = path_len(g_cwd_path);
+        while (n > 1 && g_cwd_path[n-1] != '/') n--;
+        if (n > 1) n--;
+        g_cwd_path[n] = '\0';
+        if (g_cwd_path[0] == '\0') path_copy(g_cwd_path, "/");
+        /* If we leave a mounted tree, map back to its namespace node. */
+        int idx = 0;
+        if (strcmp(g_cwd_path, "/") != 0) {
+            char tmp[256]; path_copy(tmp, g_cwd_path);
+            char *part = tmp + 1; int parent = 0;
+            while (*part) {
+                char *slash = part; while (*slash && *slash != '/') slash++;
+                char saved = *slash; *slash = '\0';
+                int next = find_child(parent, part);
+                *slash = saved;
+                if (next < 0) { idx = -1; break; }
+                parent = next; idx = next;
+                if (!saved) break;
+                part = slash + 1;
+            }
         }
+        if (idx >= 0) g_cwd = idx;
         return 0;
     }
 
-    int idx = find_child(g_cwd, name);
-    if (idx < 0 || g_nodes[idx].type != VFS_NODE_DIR) {
-        return -1;
+    path_join(candidate, g_cwd_path, name);
+    if (path_is_mount(candidate, mountpoint) && fat32_is_mounted()) {
+        if (!fat_relative(candidate, mountpoint, rel) || !fat32_is_directory(rel)) return -1;
+        path_copy(g_cwd_path, candidate);
+        g_cwd = -1; /* mounted VFS backend */
+        return 0;
     }
 
+    int idx = -1;
+    if (name[0] == '/') {
+        char tmp[256]; path_copy(tmp, candidate);
+        char *part = tmp + 1; int parent = 0;
+        while (*part) {
+            char *slash = part; while (*slash && *slash != '/') slash++;
+            char saved = *slash; *slash = '\0';
+            int next = find_child(parent, part);
+            *slash = saved;
+            if (next < 0 || g_nodes[next].type != VFS_NODE_DIR) return -1;
+            parent = next; idx = next;
+            if (!saved) break;
+            part = slash + 1;
+        }
+        if (idx < 0) idx = 0;
+    } else {
+        idx = find_child(g_cwd < 0 ? 0 : g_cwd, name);
+        if (idx < 0 || g_nodes[idx].type != VFS_NODE_DIR) return -1;
+    }
     g_cwd = idx;
+    path_copy(g_cwd_path, candidate);
     return 0;
 }
 
 void vfs_ls(void) {
+    char mountpoint[256], rel[256];
+    if (g_cwd < 0 && path_is_mount(g_cwd_path, mountpoint) && fat32_is_mounted() && fat_relative(g_cwd_path, mountpoint, rel)) {
+        fat32_list(rel);
+        return;
+    }
     int any = 0;
     for (int i = 0; i < VFS_MAX_NODES; i++) {
         if (g_nodes[i].type != VFS_NODE_FREE && g_nodes[i].parent == g_cwd) {
             console_print(g_nodes[i].name);
-            if (g_nodes[i].type == VFS_NODE_DIR) {
-                console_print("/");
-            }
-            console_print("\n");
-            any = 1;
+            if (g_nodes[i].type == VFS_NODE_DIR) console_print("/");
+            console_print("\n"); any = 1;
         }
     }
-    if (!any) {
-        console_print("(empty)\n");
-    }
+    if (!any) console_print("(empty)\n");
 }
 
 static void print_path_of(int idx) {
@@ -174,24 +270,31 @@ static void print_path_of(int idx) {
 }
 
 void vfs_pwd(void) {
-    print_path_of(g_cwd);
+    console_print(g_cwd_path);
     console_print("\n");
 }
 
 void vfs_cat(const char *name) {
+    char candidate[256], mountpoint[256], rel[256];
+    if (g_cwd < 0 || name[0] == '/') {
+        path_join(candidate, g_cwd_path, name);
+        if (path_is_mount(candidate, mountpoint) && fat32_is_mounted() && fat_relative(candidate, mountpoint, rel)) {
+            static unsigned char buf[64 * 1024];
+            unsigned int size = 0;
+            if (fat32_read_file(rel, buf, sizeof(buf) - 1, &size)) {
+                buf[size] = 0; console_print((const char *)buf); console_print("\n"); return;
+            }
+        }
+    }
     int idx = find_child(g_cwd, name);
     if (idx < 0 || g_nodes[idx].type != VFS_NODE_FILE) {
-        console_print("cat: no such file: ");
-        console_print(name);
-        console_print("\n");
-        return;
+        console_print("cat: no such file: "); console_print(name); console_print("\n"); return;
     }
-
-    console_print(g_nodes[idx].content);
-    console_print("\n");
+    console_print(g_nodes[idx].content); console_print("\n");
 }
 
 int vfs_write(const char *name, const char *content) {
+    if (g_cwd < 0) return -1;
     int idx = find_child(g_cwd, name);
 
     if (idx < 0) {
@@ -210,6 +313,7 @@ int vfs_write(const char *name, const char *content) {
 }
 
 int vfs_append(const char *name, const char *content) {
+    if (g_cwd < 0) return -1;
     int idx = find_child(g_cwd, name);
 
     if (idx < 0) {
@@ -259,6 +363,9 @@ char *vfs_split_word(char *s) {
 }
 
 int vfs_rmdir(const char *name) {
+    if (g_cwd < 0) return -1;
+    if ((g_cwd == 0 && strcmp(name, "mnt") == 0) ||
+        (g_cwd == 1 && strcmp(name, "disk0") == 0)) return -1;
     int idx = find_child(g_cwd, name);
     if (idx < 0 || g_nodes[idx].type != VFS_NODE_DIR) {
         return -1;
@@ -271,6 +378,7 @@ int vfs_rmdir(const char *name) {
 }
 
 int vfs_cp(const char *src, const char *dst) {
+    if (g_cwd < 0) return -1;
     int sidx = find_child(g_cwd, src);
     if (sidx < 0 || g_nodes[sidx].type != VFS_NODE_FILE) {
         return -1;
@@ -293,6 +401,7 @@ int vfs_cp(const char *src, const char *dst) {
 }
 
 int vfs_mv(const char *src, const char *dst) {
+    if (g_cwd < 0) return -1;
     int idx = find_child(g_cwd, src);
     if (idx < 0) {
         return -1;

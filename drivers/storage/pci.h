@@ -24,4 +24,11 @@ const nexus_pci_device_t *pci_get_device(int index);
 int pci_find_class(uint8_t class_code, uint8_t subclass, uint8_t prog_if,
                     nexus_pci_device_t *out);
 
+
+/* Полный физический адрес PCI Memory BAR (32/64-bit). 0 = invalid/I/O BAR. */
+uint64_t pci_get_bar64(const nexus_pci_device_t *dev, int index);
+
+/* Включает PCI Memory Space и/или Bus Mastering. */
+void pci_enable_device(const nexus_pci_device_t *dev, int memory_space, int bus_master);
+
 #endif

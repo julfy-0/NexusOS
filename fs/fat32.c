@@ -256,6 +256,13 @@ static int resolve_path(const char *path, fat32_dirent_t *out) {
     return 1;
 }
 
+int fat32_is_directory(const char *path) {
+    if (!g_mounted) return 0;
+    fat32_dirent_t entry;
+    if (!resolve_path(path, &entry)) return 0;
+    return (entry.attr & ATTR_DIRECTORY) != 0;
+}
+
 int fat32_list(const char *path) {
     if (!g_mounted) {
         console_print("fat32: not mounted\n");

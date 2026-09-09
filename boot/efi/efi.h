@@ -49,6 +49,12 @@ typedef struct {
     uint8_t  Data4[8];
 } EFI_GUID;
 
+/* UEFI configuration table entry. */
+typedef struct {
+    EFI_GUID VendorGuid;
+    void *VendorTable;
+} EFI_CONFIGURATION_TABLE;
+
 typedef struct {
     uint16_t Year;
     uint8_t  Month;
@@ -72,6 +78,19 @@ typedef EFI_STATUS (EFIAPI *EFI_TEXT_STRING)(
     IN CHAR16 *String
 );
 
+typedef EFI_STATUS (EFIAPI *EFI_TEXT_QUERY_MODE)(
+    IN EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *This,
+    IN UINTN ModeNumber,
+    OUT UINTN *Columns,
+    OUT UINTN *Rows
+);
+
+typedef EFI_STATUS (EFIAPI *EFI_TEXT_SET_CURSOR_POSITION)(
+    IN EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *This,
+    IN UINTN Column,
+    IN UINTN Row
+);
+
 typedef EFI_STATUS (EFIAPI *EFI_TEXT_CLEAR_SCREEN)(
     IN EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *This
 );
@@ -85,11 +104,11 @@ struct EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL {
     void                    *Reset;
     EFI_TEXT_STRING          OutputString;
     void                    *TestString;
-    void                    *QueryMode;
+    EFI_TEXT_QUERY_MODE      QueryMode;
     void                    *SetMode;
     EFI_TEXT_SET_ATTRIBUTE   SetAttribute;
     EFI_TEXT_CLEAR_SCREEN    ClearScreen;
-    void                    *SetCursorPosition;
+    EFI_TEXT_SET_CURSOR_POSITION SetCursorPosition;
     void                    *EnableCursor;
     void                    *Mode;
 };

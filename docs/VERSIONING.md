@@ -62,6 +62,7 @@ milestone, а архитектурный пивот (BIOS/i386 → UEFI/x86_64, 
 | 0.1    | genesis  | BIOS/i386/GRUB Multiboot — **архивная ветка**, заменена пивотом (docs/adr/0002) |
 | 0.3    | refit    | UEFI/x86_64 пивот (текущий) — импорт готового UEFI-загрузчика + long-mode ядра + shell/apps/fs/storage |
 | 0.4    | memoria  | Своя виртуальная память, paging, heap        |
+| 0.5    | Enstein  | VFS path traversal + mount-backed FAT32     |
 | 0.5    | threadwork | Многозадачность, планировщик               |
 | 0.6    | descent  | Syscalls, переход в ring 3, шелл в userspace  |
 | 0.7+   | (придумаем ближе к делу) | —                        |

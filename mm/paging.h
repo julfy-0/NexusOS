@@ -37,4 +37,13 @@ uint64_t paging_get_cr3(void);
  * что реально было в EFI memory map выше этого порога). Для диагностики. */
 uint64_t paging_base_identity_gib(void);
 
+/* Домапливает диапазон [start, end) уже ПОСЛЕ paging_init() и переключения
+ * CR3 — для MMIO BAR'ов (например xHCI), которые лежат выше базового
+ * идентити-диапазона и которых не было в EFI memory map/framebuffer на
+ * момент paging_init(). Пишет прямо в уже активные PDPT/PD (CR3
+ * перезагружать не нужно: записи читаются процессором при каждом обходе
+ * таблиц, а на "not present" TLB ничего не кэширует). Округляет наружу до
+ * 2 MiB, как и остальная identity-map. */
+void paging_map_region(uint64_t start, uint64_t end);
+
 #endif

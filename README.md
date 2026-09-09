@@ -8,7 +8,7 @@ AHCI+FAT32, встроенный шелл с ~50 командами.
 Собирается **обычным host `gcc`/`ld`** — если ты на x86_64 Linux,
 отдельный кросс-компилятор не нужен.
 
-> Текущая версия — **0.4.6-memoria** (см. `docs/STATUS.md`). Версия
+> Текущая версия — **0.5.0-Enstein** (см. `docs/STATUS.md`). Версия
 > 0.3.0-refit была архитектурным пивотом с прежней BIOS/i386/GRUB
 > версии на UEFI/x86_64. История и причина — `docs/adr/0002-uefi-x86_64-pivot.md`.
 
@@ -61,3 +61,32 @@ make run        # + образ диска, запуск в QEMU (нужны qemu
 Начни с `docs/STATUS.md`. Эта система (STATUS/ROADMAP/ADR/AI_HANDOFF)
 придумана специально, чтобы не зависеть от памяти конкретной AI-сессии
 — читай `docs/AI_HANDOFF.md` перед тем, как вносить изменения.
+
+
+## Boot logo
+The UEFI boot screen now uses a 6-line UTF-16 Unicode block banner for NEXUS OS and a centered text progress bar.
+
+## Current hardware target
+
+NexusOS is a generic **x86_64 / UEFI** system. Hardware is detected at runtime instead of being locked to one PC model.
+See `docs/TARGET_HARDWARE.md` and `platform/target/` for the target profile.
+
+## VFS / mount points
+
+The kernel contains a mount namespace with `/`, `/dev`, `/proc`, `/sys`, and `/tmp`.
+Physical filesystem mounting will be connected to the NVMe/AHCI block layer as those
+drivers mature.
+
+
+## 0.5.0 — Enstein
+
+### Parallel build frontend
+`./build.sh` запускает сборку параллельно. Одновременно отображаются `Kernel`, `Drivers`, `Bootloader`, а `OS` показывает общий процент готовых артефактов всей сборки. Число параллельных jobs можно задать через `NEXUS_BUILD_JOBS`.
+
+Milestone 0.5 introduces real VFS path traversal over the mount namespace. FAT32 mounted at `/mnt/disk0` is now reachable through normal `cd`, `ls`, `pwd` and `cat` paths, while the existing RAM filesystem remains available outside mounted trees.
+
+## Build
+
+```sh
+./build.sh
+```

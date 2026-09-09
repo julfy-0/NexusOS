@@ -3,6 +3,7 @@
  * процессов, ни очереди событий) — команды должны быть быстрыми и не
  * блокирующими. */
 #include "shell.h"
+#include "nexus_version.h"
 #include "console.h"
 #include "neofetch.h"
 #include "sysinfo.h"
@@ -56,6 +57,9 @@
 #include "uptime.h"
 #include "diskls.h"
 #include "diskcat.h"
+#include "gui.h"
+#include "hardware.h"
+#include "../../vfs/mount/mount.h"
 
 extern int strcmp(const char *a, const char *b);
 
@@ -78,10 +82,8 @@ static int g_history_pos = -1;
 static char g_draft_buf[SHELL_BUF_SIZE];
 
 static void print_prompt(void) {
-    console_set_color(COLOR_CYAN, COLOR_BLACK);
-    console_print("nexus");
     console_set_color(COLOR_WHITE, COLOR_BLACK);
-    console_print("> ");
+    console_print("NexusOS> ");
 }
 
 static void history_add(const char *cmd) {
@@ -291,6 +293,44 @@ static void execute(char *cmd) {
         diskls_run(args);
     } else if (strcmp(cmd, "diskcat") == 0) {
         diskcat_run(args);
+    } else if (strcmp(cmd, "hardware") == 0) {
+        hardware_run();
+    } else if (strcmp(cmd, "mount") == 0) {
+        if (args[0] == '\0') {
+            vfs_mount_list();
+        } else {
+            char *source = args;
+            char *target = vfs_split_word(source);
+            char *fstype = vfs_split_word(target);
+            if (target[0] == '\0' || fstype[0] == '\0') {
+                console_print("Usage: mount <source> <target> <fstype>\n");
+            } else if (vfs_mount(source, target, fstype, 0) < 0) {
+                console_print("mount: failed\n");
+            } else {
+                console_print("mounted ");
+                console_print(source);
+                console_print(" on ");
+                console_print(target);
+                console_print(" [");
+                console_print(fstype);
+                console_print("]\n");
+            }
+        }
+    } else if (strcmp(cmd, "umount") == 0) {
+        if (args[0] == '\0') {
+            console_print("Usage: umount <target>\n");
+        } else if (vfs_umount(args) < 0) {
+            console_print("umount: mount point not found or busy\n");
+        } else {
+            console_print("unmounted ");
+            console_print(args);
+            console_print("\n");
+        }
+    } else if (strcmp(cmd, "mounts") == 0) {
+        vfs_mount_list();
+    } else if (strcmp(cmd, "desktop-run") == 0) {
+        console_print("Starting NexusOS " NEXUS_VERSION_DISPLAY " Desktop...\n\n");
+        gui_start();
     } else if (strcmp(cmd, "reboot") == 0) {
         reboot_run();
     } else if (strcmp(cmd, "halt") == 0) {
@@ -348,10 +388,15 @@ static void execute(char *cmd) {
         console_print("  uptime            - time since boot\n");
         console_print("  diskls [path]     - list dir on real FAT32 disk\n");
         console_print("  diskcat <path>    - print file from real FAT32 disk\n");
+        console_print("  hardware          - automatic PC hardware detection\n");
+        console_print("  mount             - list or create VFS mount point\n");
+        console_print("  umount <target>   - remove VFS mount point\n");
+        console_print("  mounts            - list VFS mount points\n");
         console_print("  --- power ---\n");
         console_print("  beep              - beep the PC speaker\n");
         console_print("  reboot            - restart the machine\n");
-        console_print("  shutdown          - power off (QEMU ACPI trick)\n");
+        console_print("  shutdown          - power off (ACPI/QEMU fallback)\n");
+        console_print("  desktop-run       - start NexusOS Desktop (Esc returns here)\n");
         console_print("  halt              - stop the CPU\n");
         console_print("  clear             - clear the screen\n");
         console_print("  man <command>     - short manual entry\n");
@@ -371,9 +416,21 @@ void shell_init(void) {
     g_history_next = 0;
     g_history_pos = -1;
     vfs_init();
-    console_set_color(COLOR_YELLOW, COLOR_BLACK);
-    console_print("Type 'help' to see available commands.\n\n");
+    vfs_mount_init();
+    console_clear();
     console_set_color(COLOR_WHITE, COLOR_BLACK);
+    console_print("NexusOS Command Line — " NEXUS_VERSION_DISPLAY "\n");
+    console_print("Type 'help' for available commands.\n\n");
+    print_prompt();
+}
+
+void shell_return_from_desktop(void) {
+    console_clear();
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
+    g_len = 0;
+    g_history_pos = -1;
+    console_print("NexusOS Command Line — " NEXUS_VERSION_DISPLAY "\n");
+    console_print("Returned from NexusOS Desktop.\n\n");
     print_prompt();
 }
 
