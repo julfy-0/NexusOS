@@ -1,92 +1,65 @@
 # NexusOS
 
-Самостоятельная 64-битная ОС для x86_64, написанная с нуля на C, со
-своим UEFI-загрузчиком (без GRUB). Монолитное ядро (long mode), свой
-GDT/IDT/PIC/PIT, PS/2-клавиатура, консоль на framebuffer, диск через
-AHCI+FAT32, встроенный шелл с ~50 командами.
+A standalone 64-bit operating system for x86_64, written from scratch in C,
+with its own UEFI bootloader (without GRUB). Monolithic kernel (long mode),
+custom GDT/IDT/PIC/PIT, PS/2 keyboard and mouse support, framebuffer console,
+AHCI + FAT32 storage support, graphical desktop, and a built-in shell.
 
-Собирается **обычным host `gcc`/`ld`** — если ты на x86_64 Linux,
-отдельный кросс-компилятор не нужен.
+> Current version: **0.5.0 - Enstein**
 
-> Текущая версия — **0.5.0-Enstein** (см. `docs/STATUS.md`). Версия
-> 0.3.0-refit была архитектурным пивотом с прежней BIOS/i386/GRUB
-> версии на UEFI/x86_64. История и причина — `docs/adr/0002-uefi-x86_64-pivot.md`.
+## 🌍 Languages
 
-## Структура проекта
+- 🇬🇧 **Read in English:** [English](README.md)
+- 🇷🇺 **Читать на русском:** [Русский](README_RU.md)
+- 🇺🇦 **Читати українською:** [Українська](README_UA.md)
+- 🇩🇪 **Auf Deutsch lesen:** [Deutsch](README_DE.md)
+- 🇪🇸 **Leer en español:** [Español](README_ES.md)
+- 🇫🇷 **Lire en français:** [Français](README_FR.md)
+- 🇵🇱 **Czytaj po polsku:** [Polski](README_PL.md)
+- 🇨🇿 **Číst v češtině:** [Čeština](README_CS.md)
+- 🇨🇳 **阅读中文版：** [中文](README_ZH.md)
+- 🇯🇵 **日本語で読む：** [日本語](README_JA.md)
 
-```
+---
+
+## Project Structure
+
+```text
 NexusOS/
+
 ├── Makefile
-├── OVMF_VARS.fd              # NVRAM-переменные UEFI-прошивки для QEMU
-├── boot/efi/                 # UEFI-загрузчик (PE32+, свой ELF64-парсер, без GRUB)
-├── arch/x86_64/               # entry point, GDT, IDT, ISR, linker script, io.h
+├── build.sh
+├── run.sh
+├── create-img.sh
+├── OVMF_VARS.fd
+│
+├── boot/
+│   └── efi/                    # UEFI bootloader
+│
+├── arch/
+│   └── x86_64/                 # Architecture-specific code
+│
 ├── kernel/
-│   ├── kernel.c / kstate.h    # kmain, глобальный доступ к boot_info
-│   └── shell/                 # встроенный шелл + apps/ (~50 команд: ls, cat,
-│                               #   grep, calc, neofetch, reboot, diskls, ...)
+│   ├── gui/                    # Graphical desktop
+│   └── shell/                  # NexusOS Command Line
+│
 ├── drivers/
-│   ├── console/                # framebuffer + битмап-шрифт 8x16
-│   ├── cpu/                    # CPUID (vendor/brand/логические ядра)
-│   ├── keyboard/                # PS/2, полная инициализация i8042
-│   ├── pic/                     # 8259 remap + EOI
-│   ├── timer/                   # PIT (IRQ0)
-│   └── storage/                 # PCI enumeration, AHCI (SATA)
-├── fs/                        # FAT32 (монтирование, чтение)
-├── lib/mem.c                  # freestanding memcpy/memset/strlen/...
-├── include/nexus/boot_info.h  # контракт bootloader ↔ kernel
-├── userdata/                  # заготовки под пользовательские данные
+│   ├── console/
+│   ├── cpu/
+│   ├── keyboard/
+│   ├── mouse/
+│   ├── pic/
+│   ├── timer/
+│   └── storage/
+│
+├── fs/                         # Filesystem support
+├── lib/                        # Freestanding library
+├── include/                    # Public headers
+├── userdata/                   # User data
+│
 └── docs/
-    ├── STATUS.md              # ЧИТАТЬ ПЕРВЫМ — текущее состояние
-    ├── AI_HANDOFF.md          # правила для продолжающего (человек или AI)
-    ├── ROADMAP.md             # путь развития по milestone'ам
-    ├── VERSIONING.md          # наша схема версий
-    ├── MIGRATION_0002.md      # таблица старые-пути → новые-пути (пивот)
-    ├── adr/                   # архитектурные решения и почему
-    ├── ARCHITECTURE.md        # поток загрузки, прерывания, память
-    └── BUILDING.md            # как собрать и запустить
-```
-
-## Быстрый старт
-
-```bash
-make            # build/BOOTX64.EFI + build/kernel.elf
-make run        # + образ диска, запуск в QEMU (нужны qemu-system-x86_64,
-                #   ovmf, dosfstools, mtools — apt install, без сборки toolchain)
-```
-
-Подробности, известные проблемы и как их лечить — `docs/BUILDING.md`.
-
-## Продолжаешь с другой нейронкой или через месяц?
-
-Начни с `docs/STATUS.md`. Эта система (STATUS/ROADMAP/ADR/AI_HANDOFF)
-придумана специально, чтобы не зависеть от памяти конкретной AI-сессии
-— читай `docs/AI_HANDOFF.md` перед тем, как вносить изменения.
-
-
-## Boot logo
-The UEFI boot screen now uses a 6-line UTF-16 Unicode block banner for NEXUS OS and a centered text progress bar.
-
-## Current hardware target
-
-NexusOS is a generic **x86_64 / UEFI** system. Hardware is detected at runtime instead of being locked to one PC model.
-See `docs/TARGET_HARDWARE.md` and `platform/target/` for the target profile.
-
-## VFS / mount points
-
-The kernel contains a mount namespace with `/`, `/dev`, `/proc`, `/sys`, and `/tmp`.
-Physical filesystem mounting will be connected to the NVMe/AHCI block layer as those
-drivers mature.
-
-
-## 0.5.0 — Enstein
-
-### Parallel build frontend
-`./build.sh` запускает сборку параллельно. Одновременно отображаются `Kernel`, `Drivers`, `Bootloader`, а `OS` показывает общий процент готовых артефактов всей сборки. Число параллельных jobs можно задать через `NEXUS_BUILD_JOBS`.
-
-Milestone 0.5 introduces real VFS path traversal over the mount namespace. FAT32 mounted at `/mnt/disk0` is now reachable through normal `cd`, `ls`, `pwd` and `cat` paths, while the existing RAM filesystem remains available outside mounted trees.
-
-## Build
-
-```sh
-./build.sh
-```
+    ├── STATUS.md
+    ├── ROADMAP.md
+    ├── ARCHITECTURE.md
+    ├── BUILDING.md
+    └── ...
