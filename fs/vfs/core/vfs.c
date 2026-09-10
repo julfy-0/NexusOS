@@ -1,6 +1,6 @@
 #include "vfs.h"
 #include "console.h"
-#include "../../vfs/mount/mount.h"
+#include "mount.h"
 #include "fat32.h"
 
 extern int strcmp(const char *a, const char *b);
@@ -465,4 +465,25 @@ void vfs_df(unsigned int *out_used, unsigned int *out_total) {
 
     *out_used = used;
     *out_total = VFS_MAX_NODES;
+}
+
+
+int vfs_gui_list(char names[][VFS_NAME_LEN], unsigned char is_dir[], int max_entries) {
+    int count = 0;
+    if (max_entries <= 0 || g_cwd < 0) return 0;
+    for (int i = 0; i < VFS_MAX_NODES && count < max_entries; i++) {
+        if (g_nodes[i].type != VFS_NODE_FREE && g_nodes[i].parent == g_cwd) {
+            copy_truncate(names[count], g_nodes[i].name, VFS_NAME_LEN);
+            is_dir[count] = (g_nodes[i].type == VFS_NODE_DIR) ? 1 : 0;
+            count++;
+        }
+    }
+    return count;
+}
+
+void vfs_gui_getcwd(char *out, int out_size) {
+    if (!out || out_size <= 0) return;
+    int i = 0;
+    while (g_cwd_path[i] && i < out_size - 1) { out[i] = g_cwd_path[i]; i++; }
+    out[i] = '\0';
 }

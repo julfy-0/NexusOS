@@ -9,7 +9,7 @@ void meminfo_run(void) {
     console_set_color(COLOR_WHITE, COLOR_BLACK);
     console_print("  CR3 (PML4 phys):   ");
     console_print_hex(paging_get_cr3());
-    console_print("\n  Own page tables:   yes (built in mm/paging.c, not UEFI's)\n");
+    console_print("\n  Own page tables:   yes (built in kernel/mm/paging.c, not UEFI's)\n");
     console_print("  Page size:         2 MiB\n");
     console_print("  Base identity map: 0 .. ");
     console_print_dec(paging_base_identity_gib());

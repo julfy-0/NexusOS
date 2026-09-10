@@ -7,7 +7,7 @@
 
 ## Версия
 
-**0.5.0-Enstein** (см. `docs/VERSIONING.md`). Milestone 0.3 (refit)
+**0.5.1 — Desktop Update** (см. `docs/VERSIONING.md`). Milestone 0.3 (refit)
 закрыт: живой бут в QEMU+OVMF подтверждён, встроенный шелл и команды
 проверены и работают. Предыдущий скачок 0.1.2 → 0.3.0 — замена
 архитектуры целиком, см. `docs/adr/0002-uefi-x86_64-pivot.md`.
@@ -16,9 +16,34 @@
 единственное место в коде, откуда её берут команды `version`/`neofetch`/
 `uname` (раньше каждая хардкодила свою несовпадающую строку).
 
+
+### 0.5.1 Desktop Update
+
+- [x] Graphical desktop launched with `desktop-run`
+- [x] Files, Terminal and Settings GUI applications
+- [x] Nexus Menu and Desktop Search
+- [x] Keyboard and PS/2 mouse navigation in the GUI
+- [x] Floating responsive dock and final GUI polish
+- [x] Release build verified with `make clean && make iso`
+
+## Организация исходников
+
+- `boot/uefi/` — собственный UEFI-загрузчик, разделённый на `src/`, `include/` и `assets/`
+- `kernel/core/` — точка входа ядра, состояние ядра, panic и usermode foundation
+- `kernel/arch/x86_64/` — архитектурно-зависимые GDT/IDT/ISR/entry/linker
+- `kernel/mm/` — собственный paging
+- `drivers/` — устройства, сгруппированные по назначению (input, storage, bus, graphics, timer, hardware, usb)
+- `fs/vfs/` — VFS core, mount namespace и filesystem registry; `fs/fat32/` — FAT32
+- `gui/` — GUI core и renderer/font boundary
+- `shell/` — shell core и команды по категориям
+- `assets/` — заменяемые wallpapers/fonts
+- `include/nexus/` — общие заголовки NexusOS
+
+Это реорганизация существующего кода, а не новая архитектура ядра: монолитная модель и текущие runtime-зависимости сохранены.
+
 ## Архитектура
 
-- **UEFI** (свой загрузчик `boot/efi/`, PE32+, парсит ELF64 сам —
+- **UEFI** (свой загрузчик `boot/uefi/`, PE32+, парсит ELF64 сам —
   без GRUB), не BIOS
 - **x86_64 long mode**, не i386
 - **Монолитное ядро** (не изменилось, см. `docs/adr/0001`) — шелл
@@ -42,15 +67,15 @@
 - [x] PCI enumeration, AHCI (SATA), FAT32 (монтирование, чтение)
 - [x] Встроенный шелл + **~50 команд** (ls/cat/cp/mv/grep/find/diff/
       wc/df/du/calc/hex/dec/neofetch/sysinfo/reboot/halt/... —
-      полный список в `kernel/shell/apps/`)
+      полный список в `shell/apps/`)
 - [x] `kstate` — глобальный доступ к boot_info (framebuffer, memory map)
       из любого места ядра
-- [x] Свои page tables (`mm/paging.c`) — 4-уровневая схема PML4/PDPT/PD,
+- [x] Свои page tables (`kernel/mm/paging.c`) — 4-уровневая схема PML4/PDPT/PD,
       2 MiB страницы, реально переключает CR3 (не identity-map от UEFI)
 - [x] Page fault handler (vector 14) — расшифровка CR2/error code
       (present/write/user/reserved/instruction-fetch)
 - [x] Scrollback в консоли (PgUp/PgDn) — кольцевой буфер истории строк
-      в `drivers/console/console.c`, живой вывод не замедляет
+      в `drivers/graphics/framebuffer/console.c`, живой вывод не замедляет
 - [x] `neofetch` расширен: измеренная частота CPU (калибровка TSC по
       PIT, `cpu_measure_freq_mhz()`), пользователь, uptime — не только
       vendor/brand/cores/память, как раньше
@@ -72,7 +97,7 @@
   memory map с момента бута, не живой трекинг аллокаций — `kmalloc`
   ещё не существует, значит и трекать пока нечего. Как появится heap —
   заменить на честную живую статистику аллокатора (см. комментарий в
-  `kernel/shell/apps/neofetch.c`).
+  `shell/apps/neofetch.c`).
 - `neofetch` блокирует на ~150 мс на калибровку CPU-частоты (busy-wait
   на PIT) — ожидаемо, не баг.
 - Клавиатура — US QWERTY, Shift обрабатывается, Ctrl/Alt — нет

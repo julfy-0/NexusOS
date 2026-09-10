@@ -1,6 +1,6 @@
 # NexusOS build.sh
 
-`build.sh` is the pretty command-line build frontend for NexusOS 0.5.0 - Enstein.
+`build.sh` is the pretty command-line build frontend for NexusOS 0.5.1.
 
 Run from the project root:
 
@@ -14,7 +14,7 @@ For an incremental build without removing `build/` and `iso/` first:
 ./build.sh --no-clean
 ```
 
-The four progress lines represent real build stages:
+The four progress lines represent build artifact groups:
 
 ```text
 Kernel       [################........]  66%
@@ -23,7 +23,7 @@ Bootloader   [########################] 100%
 OS           [########################] 100%
 ```
 
-The progress bar advances after successful Make targets. It is a frontend over the existing Makefile, not a separate build system.
+The bars are derived from real object/final-output files under `build/` and `iso/`. `OS` is the overall completion ratio across the complete build artifact set. The script is a frontend over the existing Makefile, not a separate build system.
 
 
 ### Parallel build

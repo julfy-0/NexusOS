@@ -12,7 +12,7 @@
 #include "pic.h"
 #include "kstate.h"
 #include "shell.h"
-#include "vfs/mount/mount.h"
+#include "mount.h"
 #include "pit.h"
 #include "pci.h"
 #include "ahci.h"

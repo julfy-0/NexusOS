@@ -59,7 +59,7 @@
 #include "diskcat.h"
 #include "gui.h"
 #include "hardware.h"
-#include "../../vfs/mount/mount.h"
+#include "mount.h"
 
 extern int strcmp(const char *a, const char *b);
 

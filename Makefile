@@ -1,215 +1,131 @@
-# =============================================================
-#  NexusOS — Makefile (UEFI / x86_64)
-# =============================================================
-#  Собирается ОБЫЧНЫМ host gcc/ld — если ты на x86_64 Linux,
-#  отдельный кросс-компилятор НЕ нужен (в отличие от старой
-#  BIOS/i386-версии этого проекта, см. docs/adr/0002).
+# NexusOS 0.5.1 — unified freestanding build
 #
-#  make            — собрать build/BOOTX64.EFI и build/kernel.elf
-#  make iso        — собрать iso/ (структура ESP: EFI/BOOT/BOOTX64.EFI + kernel.elf)
-#  make run        — собрать FAT-образ диска и запустить в QEMU (OVMF)
-#  make clean      — удалить всё собранное
+# The source tree is organized by subsystem. Object files mirror the source
+# paths under build/, which prevents filename collisions as the project grows.
 #
-#  Нужны для `make run`: qemu-system-x86_64, OVMF (пакет ovmf),
-#  dosfstools (mkfs.vfat), mtools (mcopy). Все — обычные пакеты
-#  дистрибутива, никакой сборки toolchain не требуется.
-# =============================================================
+# Requirements on x86_64 Linux:
+#   gcc, binutils
+#   make iso: no additional tools
+#   make run: qemu-system-x86_64, OVMF, dosfstools, mtools
 
 CC      := gcc
 LD      := ld
+OBJCOPY := objcopy
 
-BUILD   := build
-ISODIR  := iso
+BUILD := build
+ISODIR := iso
 
-INCLUDES := -Iinclude/nexus -Iarch/x86_64 -Ikernel -Ikernel/shell -Ikernel/shell/apps \
-            -Idrivers/console -Idrivers/cpu -Idrivers/keyboard -Idrivers/pic -Idrivers/timer \
-            -Idrivers/storage -Idrivers/usb -Idrivers/mouse -Ifs -Imm -Ikernel/gui -Ikernel/usermode -Iplatform/target
+# Every kernel-side module gets access to its own directory plus the shared
+# public headers. This keeps source includes short and avoids fragile
+# ../../ paths when modules move.
+MODULE_DIRS := $(shell find kernel drivers fs lib gui shell platform -type d 2>/dev/null | sort)
+INCLUDES := -Iinclude/nexus $(addprefix -I,$(MODULE_DIRS)) -Iassets/fonts
 
-# --- Загрузчик: freestanding PE32+/EFI, MS x64 ABI ---
-CFLAGS_EFI  := -ffreestanding -fno-stack-protector -fno-stack-check \
-               -fshort-wchar -mno-red-zone -fpic -fno-ident \
-               -Iinclude/nexus -Iboot/efi -Wall -Wextra -O2 -c
+# --- UEFI bootloader: freestanding PE32+, MS x64 ABI ---
+EFI_INCLUDES := -Iinclude/nexus -Iboot/uefi/include -Iboot/uefi/src -Iboot/uefi/assets
+CFLAGS_EFI := -ffreestanding -fno-stack-protector -fno-stack-check \
+              -fshort-wchar -mno-red-zone -fpic -fno-ident \
+              -Wall -Wextra -O2 $(EFI_INCLUDES) -c
 LDFLAGS_EFI := -m i386pep -nostdlib -shared -Bsymbolic -e efi_main --subsystem 10
 
-# --- Ядро: freestanding ELF64, System V ABI, без FPU/SSE
-#     (мы не настраивали CR0/CR4 для этого — как и в исходном проекте) ---
+# --- Kernel: freestanding ELF64, System V ABI ---
 CFLAGS_KERNEL := -ffreestanding -fno-stack-protector -fno-stack-check \
                  -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mgeneral-regs-only \
                  -fno-pic -fno-pie -fno-ident \
                  -Wall -Wextra -O2 $(INCLUDES) -c
-LDFLAGS_KERNEL := -nostdlib -static -T arch/x86_64/linker.ld
+LDFLAGS_KERNEL := -nostdlib -static -T kernel/arch/x86_64/linker.ld
 
-.PHONY: all clean bootloader kernel iso run check
+KERNEL_C_SRCS := $(shell find kernel drivers fs lib gui shell platform -type f -name '*.c' ! -path 'kernel/bootmode/*' 2>/dev/null | sort)
+KERNEL_S_SRCS := $(shell find kernel/arch/x86_64 -type f -name '*.S' 2>/dev/null | sort)
+
+KERNEL_C_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERNEL_C_SRCS))
+KERNEL_S_OBJS := $(patsubst %.S,$(BUILD)/%.o,$(KERNEL_S_SRCS))
+WALLPAPER_OBJ := $(BUILD)/assets/wallpapers/nexus_default.o
+
+# Keep architecture entry stubs first in the linker input, then C modules.
+KERNEL_OBJS := $(KERNEL_S_OBJS) $(KERNEL_C_OBJS) $(WALLPAPER_OBJ)
+
+BOOT_OBJS := $(BUILD)/boot/uefi/src/boot.o $(BUILD)/boot/uefi/mem.o
+
+.PHONY: all clean bootloader kernel iso run check check-boot
 
 all: bootloader kernel
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
-# ---------------- Загрузчик (boot/efi) ----------------
+# ---------------------------------------------------------------------------
+# UEFI bootloader
+# ---------------------------------------------------------------------------
 
-BOOT_OBJS := $(BUILD)/boot.o $(BUILD)/mem_efi.o
+$(BUILD)/boot/uefi/src/boot.o: boot/uefi/src/boot.c | $(BUILD)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_EFI) $< -o $@
 
-$(BUILD)/boot.o: boot/efi/boot.c boot/efi/efi.h boot/efi/elf.h boot/efi/nexus_logo.h include/nexus/boot_info.h | $(BUILD)
-	$(CC) $(CFLAGS_EFI) boot/efi/boot.c -o $@
-
-$(BUILD)/mem_efi.o: lib/mem.c | $(BUILD)
-	$(CC) $(CFLAGS_EFI) lib/mem.c -o $@
+# lib/memory/mem.c is deliberately compiled twice: once for EFI's ABI and
+# once for the kernel's freestanding environment.
+$(BUILD)/boot/uefi/mem.o: lib/memory/mem.c | $(BUILD)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_EFI) $< -o $@
 
 bootloader: $(BOOT_OBJS)
 	$(LD) $(LDFLAGS_EFI) -o $(BUILD)/BOOTX64.EFI $(BOOT_OBJS)
-	@echo "==> Загрузчик собран: $(BUILD)/BOOTX64.EFI"
+	@echo "==> UEFI bootloader: $(BUILD)/BOOTX64.EFI"
 
-# ---------------- Ядро (arch/ + kernel/ + drivers/ + fs/) ----------------
+# ---------------------------------------------------------------------------
+# Generic kernel-side compilation
+# ---------------------------------------------------------------------------
 
-CORE_OBJS := $(BUILD)/entry.o $(BUILD)/kernel.o \
-             $(BUILD)/gdt.o $(BUILD)/gdt_asm.o $(BUILD)/idt.o $(BUILD)/isr.o \
-             $(BUILD)/paging.o \
-             $(BUILD)/kstate.o $(BUILD)/mem_kernel.o $(BUILD)/panic.o $(BUILD)/gui.o $(BUILD)/usermode.o $(BUILD)/target.o $(BUILD)/mount_table.o $(BUILD)/fs_registry.o
+$(BUILD)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_KERNEL) $< -o $@
 
-FS_OBJS := $(BUILD)/pci.o $(BUILD)/ahci.o $(BUILD)/fat32.o
+$(BUILD)/%.o: %.S
+	@mkdir -p $(dir $@)
+	$(CC) -ffreestanding -fno-ident -mno-red-zone -c $< -o $@
 
-DRIVER_OBJS := $(BUILD)/console.o $(BUILD)/pic.o $(BUILD)/cpu.o $(BUILD)/keyboard.o $(BUILD)/pit.o $(BUILD)/xhci.o $(BUILD)/mouse.o
-
-APP_NAMES := vfs neofetch sysinfo meminfo about whoami version date echo reverse len \
-             upper lower title calc sum hex dec isprime fib \
-             ls pwd cd mkdir rmdir touch rm cp mv \
-             cat less head tail grep diff find \
-             write append wc df du colors beep \
-             reboot halt shutdown uname man \
-             lspci uptime diskls diskcat hardware
-
-SHELL_OBJS := $(BUILD)/shell.o $(patsubst %,$(BUILD)/%.o,$(APP_NAMES))
-
-KERNEL_OBJS := $(CORE_OBJS) $(FS_OBJS) $(DRIVER_OBJS) $(SHELL_OBJS)
-
-# -- arch/x86_64 (asm) --
-$(BUILD)/entry.o: arch/x86_64/entry.S | $(BUILD)
-	$(CC) -ffreestanding -c arch/x86_64/entry.S -o $@
-
-$(BUILD)/gdt_asm.o: arch/x86_64/gdt_asm.S | $(BUILD)
-	$(CC) -ffreestanding -c arch/x86_64/gdt_asm.S -o $@
-
-$(BUILD)/isr.o: arch/x86_64/isr.S | $(BUILD)
-	$(CC) -ffreestanding -c arch/x86_64/isr.S -o $@
-
-# -- arch/x86_64 (C) --
-$(BUILD)/gdt.o: arch/x86_64/gdt.c | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) arch/x86_64/gdt.c -o $@
-
-$(BUILD)/idt.o: arch/x86_64/idt.c | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) arch/x86_64/idt.c -o $@
-
-# -- mm/ --
-$(BUILD)/paging.o: mm/paging.c mm/paging.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) mm/paging.c -o $@
-
-# -- kernel/ --
-$(BUILD)/kernel.o: kernel/kernel.c | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) kernel/kernel.c -o $@
-
-$(BUILD)/kstate.o: kernel/kstate.c kernel/kstate.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) kernel/kstate.c -o $@
-
-$(BUILD)/panic.o: kernel/panic.c kernel/panic.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) kernel/panic.c -o $@
-
-$(BUILD)/mem_kernel.o: lib/mem.c | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) lib/mem.c -o $@
-
-$(BUILD)/gui.o: kernel/gui/gui.c kernel/gui/gui.h drivers/mouse/mouse.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) kernel/gui/gui.c -o $@
-
-$(BUILD)/usermode.o: kernel/usermode/usermode.c kernel/usermode/usermode.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) kernel/usermode/usermode.c -o $@
-
-$(BUILD)/target.o: platform/target/target.c platform/target/target.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) platform/target/target.c -o $@
-
-
-$(BUILD)/shell.o: kernel/shell/shell.c kernel/shell/shell.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) kernel/shell/shell.c -o $@
-
-define APP_RULE
-$(BUILD)/$(1).o: kernel/shell/apps/$(1).c kernel/shell/apps/$(1).h | $(BUILD)
-	$$(CC) $$(CFLAGS_KERNEL) kernel/shell/apps/$(1).c -o $$@
-endef
-$(foreach app,$(APP_NAMES),$(eval $(call APP_RULE,$(app))))
-
-# -- fs/ + drivers/storage (диск и файловые системы) --
-$(BUILD)/pci.o: drivers/storage/pci.c drivers/storage/pci.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) drivers/storage/pci.c -o $@
-
-$(BUILD)/ahci.o: drivers/storage/ahci.c drivers/storage/ahci.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) drivers/storage/ahci.c -o $@
-
-$(BUILD)/fat32.o: fs/fat32.c fs/fat32.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) fs/fat32.c -o $@
-
-# -- drivers/ (остальные) --
-$(BUILD)/console.o: drivers/console/console.c drivers/console/font8x16.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) drivers/console/console.c -o $@
-
-$(BUILD)/pic.o: drivers/pic/pic.c | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) drivers/pic/pic.c -o $@
-
-$(BUILD)/pit.o: drivers/timer/pit.c | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) drivers/timer/pit.c -o $@
-
-$(BUILD)/cpu.o: drivers/cpu/cpu.c | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) drivers/cpu/cpu.c -o $@
-
-$(BUILD)/keyboard.o: drivers/keyboard/keyboard.c drivers/keyboard/keyboard.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) drivers/keyboard/keyboard.c -o $@
-
-$(BUILD)/xhci.o: drivers/usb/xhci.c drivers/usb/xhci.h drivers/storage/pci.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) drivers/usb/xhci.c -o $@
-
-$(BUILD)/mouse.o: drivers/mouse/mouse.c drivers/mouse/mouse.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) drivers/mouse/mouse.c -o $@
+$(WALLPAPER_OBJ): assets/wallpapers/nexus_default.rgb565 | $(BUILD)
+	@mkdir -p $(dir $@)
+	$(OBJCOPY) -I binary -O elf64-x86-64 -B i386:x86-64 \
+		--rename-section .data=.rodata,alloc,load,readonly,data,contents \
+		$< $@
 
 kernel: $(KERNEL_OBJS)
 	$(LD) $(LDFLAGS_KERNEL) -o $(BUILD)/kernel.elf $(KERNEL_OBJS)
-	@echo "==> Ядро собрано: $(BUILD)/kernel.elf"
+	@echo "==> Kernel: $(BUILD)/kernel.elf"
 
-# ---------------- Образ ESP (EFI System Partition) ----------------
+# ---------------------------------------------------------------------------
+# EFI System Partition staging
+# ---------------------------------------------------------------------------
 
 iso: bootloader kernel
 	mkdir -p $(ISODIR)/EFI/BOOT
 	cp $(BUILD)/BOOTX64.EFI $(ISODIR)/EFI/BOOT/BOOTX64.EFI
 	cp $(BUILD)/kernel.elf $(ISODIR)/kernel.elf
-	@echo "==> $(ISODIR)/ готов (структура ESP)"
+	@echo "==> ESP staged in $(ISODIR)/"
 
-# Требует qemu-system-x86_64, OVMF, dosfstools (mkfs.vfat), mtools (mcopy).
+# Keep make run compatible with the existing QEMU frontend.
 run: iso
-	mkdir -p $(BUILD)
-	dd if=/dev/zero of=$(BUILD)/fat.img bs=1M count=64 status=none
-	mkfs.vfat -F 32 $(BUILD)/fat.img >/dev/null
-	mcopy -i $(BUILD)/fat.img -s $(ISODIR)/* ::/
-	@if [ ! -f OVMF_VARS.fd ]; then \
-		cp /usr/share/OVMF/OVMF_VARS_4M.fd ./OVMF_VARS.fd; \
-	fi
-	qemu-system-x86_64 \
-		-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
-		-drive if=pflash,format=raw,file=OVMF_VARS.fd \
-		-drive format=raw,file=$(BUILD)/fat.img \
-		-m 256M \
-		-full-screen \
-		-device qemu-xhci,id=xhci \
-		-display gtk,gl=on
+	./run.sh
 
-# Быстрая проверка синтаксиса всех .c без реальной сборки.
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
 check:
-	@for f in $$(find boot kernel drivers fs lib mm -name '*.c'); do \
-		$(CC) $(CFLAGS_KERNEL) -fsyntax-only $$f || exit 1; \
+	@set -e; \
+	for f in $$(find kernel drivers fs lib gui shell platform -type f -name '*.c' ! -path 'kernel/bootmode/*' | sort); do \
+		$(CC) $(CFLAGS_KERNEL) -fsyntax-only "$$f"; \
 	done
-	@echo "==> Синтаксис в порядке"
+	@echo "==> Kernel-side C syntax: OK"
+	@$(MAKE) --no-print-directory check-boot
+
+check-boot:
+	@set -e; \
+	for f in $$(find boot/uefi/src -type f -name '*.c' | sort); do \
+		$(CC) $(CFLAGS_EFI) -fsyntax-only "$$f"; \
+	done
+	@echo "==> UEFI C syntax: OK"
 
 clean:
 	rm -rf $(BUILD) $(ISODIR)
-
-$(BUILD)/mount_table.o: kernel/vfs/mount/mount.c kernel/vfs/mount/mount.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) kernel/vfs/mount/mount.c -o $@
-
-$(BUILD)/fs_registry.o: kernel/vfs/fs/fs.c kernel/vfs/fs/fs.h | $(BUILD)
-	$(CC) $(CFLAGS_KERNEL) kernel/vfs/fs/fs.c -o $@

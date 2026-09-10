@@ -8,24 +8,24 @@
 
 | Старый путь (проект пользователя) | Новый путь (эта репа)          |
 |-------------------------------------|----------------------------------|
-| `boot/efi/boot.c`, `efi.h`, `elf.h` | `boot/efi/`                      |
-| `boot/kernel/entry.S`               | `arch/x86_64/entry.S`            |
-| `boot/kernel/gdt.c/h`, `gdt_asm.S`  | `arch/x86_64/`                   |
-| `boot/kernel/idt.c/h`, `isr.S`      | `arch/x86_64/`                   |
-| `boot/kernel/kernel.ld`             | `arch/x86_64/linker.ld`          |
-| `vendor/io.h`                       | `arch/x86_64/io.h`               |
-| `boot/kernel/kernel.c`              | `kernel/kernel.c`                |
-| `boot/kernel/kstate.c/h`            | `kernel/kstate.c/h`              |
-| `system/shell.c/h`                  | `kernel/shell/shell.c/h`         |
-| `system/apps/*.c/h` (50 файлов)     | `kernel/shell/apps/`             |
-| `vendor/cpu/*`                      | `drivers/cpu/`                   |
-| `vendor/display/*` (+font8x16.h)   | `drivers/console/`               |
-| `vendor/input/keyboard.*`           | `drivers/keyboard/`              |
-| `vendor/interrupt/pic.*`            | `drivers/pic/`                   |
+| `boot/uefi/boot.c`, `efi.h`, `elf.h` | `boot/uefi/`                      |
+| `boot/kernel/entry.S`               | `kernel/arch/x86_64/entry.S`            |
+| `boot/kernel/gdt.c/h`, `gdt_asm.S`  | `kernel/arch/x86_64/`                   |
+| `boot/kernel/idt.c/h`, `isr.S`      | `kernel/arch/x86_64/`                   |
+| `boot/kernel/kernel.ld`             | `kernel/arch/x86_64/linker.ld`          |
+| `vendor/io.h`                       | `kernel/arch/x86_64/io.h`               |
+| `boot/kernel/core/kernel.c`              | `kernel/core/kernel.c`                |
+| `boot/kernel/core/kstate.c/h`            | `kernel/core/kstate.c/h`              |
+| `system/shell.c/h`                  | `shell/shell.c/h`         |
+| `system/apps/*.c/h` (50 файлов)     | `shell/apps/`             |
+| `vendor/cpu/*`                      | `drivers/hardware/cpu/`                   |
+| `vendor/display/*` (+font8x16.h)   | `drivers/graphics/framebuffer/`               |
+| `vendor/input/keyboard.*`           | `drivers/input/keyboard/`              |
+| `vendor/interrupt/pic.*`            | `drivers/hardware/pic/`                   |
 | `vendor/timer/pit.*`                | `drivers/timer/`                 |
 | `ms/storage/pci.*`, `ahci.*`        | `drivers/storage/`               |
 | `ms/fs/fat32.*`                     | `fs/`                            |
-| `common/mem.c`                      | `lib/mem.c`                      |
+| `common/mem.c`                      | `lib/memory/mem.c`                      |
 | `common/boot_info.h`                | `include/nexus/boot_info.h`      |
 | `userdata/`                         | `userdata/` (без изменений)      |
 | `extras/c-practice/`                | **не перенесено** — личные C-упражнения автора, не относятся к ОС |

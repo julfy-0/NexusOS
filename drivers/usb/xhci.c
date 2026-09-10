@@ -84,7 +84,7 @@ static uint32_t g_page_size;    /* PAGESIZE-регистр контроллер�
 
 /* --- статическая (без malloc) DMA-память для структур контроллера ---
  * Всё это лежит в BSS ядра, то есть в первых BASE_IDENTITY_GIB (см.
- * mm/paging.c) — уже identity-mapped, дополнительно мапить не нужно. */
+ * kernel/mm/paging.c) — уже identity-mapped, дополнительно мапить не нужно. */
 static xhci_trb_t g_cmd_ring[CMD_RING_TRBS]      __attribute__((aligned(64)));
 static xhci_trb_t g_evt_ring[EVT_RING_TRBS]      __attribute__((aligned(64)));
 static xhci_trb_t g_ep0_ring[EP0_RING_TRBS]      __attribute__((aligned(64)));
@@ -674,7 +674,7 @@ int xhci_init(void) {
 
     /* BAR может лежать вне всего, что уже замаплено paging_init()
      * (базовый диапазон, EFI memory map, framebuffer) — MMIO там не
-     * числится. Мапим явно и некэшируемо (см. mm/paging.c), иначе
+     * числится. Мапим явно и некэшируемо (см. kernel/mm/paging.c), иначе
      * первое же чтение регистра — page fault, а doorbell-записи молча
      * зависали бы в кэше. */
     paging_map_region(bar, bar + 0x200000ULL);

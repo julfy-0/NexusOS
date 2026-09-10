@@ -1,5 +1,42 @@
 # CHANGELOG.md
 
+## [0.5.1] — Desktop Update
+
+### Architecture maintenance
+- Reorganized the existing source tree by subsystem without changing the kernel model or runtime behavior.
+- Moved the UEFI loader into `boot/uefi/{src,include,assets}` and x86_64 kernel architecture code into `kernel/arch/x86_64`.
+- Separated kernel core, memory management, VFS core/mount/registry, GUI core/renderer, shell core/commands, and driver categories.
+- Moved the existing bitmap font and wallpaper into replaceable shared asset directories.
+- Reworked the Makefile to mirror source paths under `build/`, avoiding object-name collisions and making new modules discoverable automatically.
+- Updated `build.sh` to 0.5.1, retained parallel GNU Make builds, and kept `--no-clean` support.
+- No release-version bump: this remains the 0.5.1 architecture optimization.
+
+
+### Desktop
+- Added the new NexusOS graphical desktop with wallpaper, floating dock, application icons, clock and active application labels.
+- Added keyboard and mouse navigation across the desktop UI.
+- Added hover states and edge-detected mouse clicks.
+
+### Applications
+- Added graphical Files with VFS-backed navigation.
+- Added graphical Terminal with interactive command input.
+- Added graphical Settings with system information.
+- Added Nexus Menu with Desktop, Files, Terminal, Settings, Reboot and Shutdown actions.
+
+### Search
+- Added Desktop Search for applications and system actions.
+- Search supports text input, Backspace, keyboard selection, Enter and Escape.
+
+### Integration
+- GUI starts through the existing `desktop-run` command and returns to the CLI when closed.
+- Preserved the existing UEFI bootloader, CLI, VFS, paging, GDT/IDT/PIC/PIT, Kernel Panic, PS/2 keyboard and mouse drivers.
+- Added `build.sh` parallel build frontend with Kernel, Drivers, Bootloader and overall OS progress.
+
+### Release validation
+- Verified with `make clean && make iso`.
+- UEFI bootloader and kernel build successfully and the ESP layout is generated.
+
+
 ## [0.5.0] — Enstein
 
 - Реализована первая рабочая прослойка VFS path traversal поверх mount namespace.
@@ -15,7 +52,7 @@
 
 - `neofetch` расширен тремя новыми полями:
   - **CPU Speed** — реальное измерение частоты через калибровку TSC по
-    PIT (`cpu_measure_freq_mhz()`, `drivers/cpu/cpu.c`), а не чтение
+    PIT (`cpu_measure_freq_mhz()`, `drivers/hardware/cpu/cpu.c`), а не чтение
     статического поля CPUID leaf 0x16 (тот часто не реализован
     гипервизорами, включая QEMU/TCG — были бы нули или мусор что на
     реальном железе, что в виртуалке в непредсказуемых случаях).
@@ -48,7 +85,7 @@
   и ни одна не совпадала с версией из `STATUS.md`. Теперь все три
   подключают общий заголовок; `neofetch` заодно лишился более неверного
   тега "(alpha)" у названия ОС
-- Названо `nexus_version.h`, а не `version.h` — в `kernel/shell/apps/`
+- Названо `nexus_version.h`, а не `version.h` — в `shell/apps/`
   уже есть свой `version.h` (заголовок команды `version`), одинаковое
   имя означало бы, что инклюд подхватывает не тот файл в зависимости
   от порядка путей поиска
@@ -56,7 +93,7 @@
 ## [0.4.3] — memoria
 
 - Scrollback в консоли: PgUp/PgDn листают историю вывода
-  (`drivers/console/console.c`, `drivers/keyboard/keyboard.c`).
+  (`drivers/graphics/framebuffer/console.c`, `drivers/input/keyboard/keyboard.c`).
   Кольцевой буфер на 500 строк (символ + цвет каждой ячейки), пишется
   параллельно с живым выводом без просадки скорости печати. Любая
   новая печать (набор текста, вывод команды) сама возвращает к живому
@@ -67,13 +104,13 @@
 
 ## [0.4.2] — memoria
 
-- Page fault handler (vector 14, `arch/x86_64/idt.c`) — расшифровка
+- Page fault handler (vector 14, `kernel/arch/x86_64/idt.c`) — расшифровка
   CR2 (адрес обращения) и error code (present/write/user/reserved/
   instruction-fetch) вместо общего `panic_screen()` без деталей
 
 ## [0.4.1] — memoria
 
-- Свои page tables — `mm/paging.c`/`mm/paging.h`. 4-уровневая схема
+- Свои page tables — `kernel/mm/paging.c`/`kernel/mm/paging.h`. 4-уровневая схема
   x86_64 (PML4/PDPT/PD), 2 MiB страницы, строит identity-map по
   EFI memory map из `boot_info` + framebuffer и реально переключает
   CR3 (раньше жили на identity-map, оставленной UEFI firmware —

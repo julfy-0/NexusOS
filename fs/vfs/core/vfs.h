@@ -84,3 +84,8 @@ void vfs_df(unsigned int *out_used, unsigned int *out_total);
 char *vfs_split_word(char *s);
 
 #endif /* NEXUSOS_VFS_H */
+
+/* GUI helpers: return a snapshot of the current RAM-VFS directory without
+ * printing to the console. Names are copied into caller-owned buffers. */
+int vfs_gui_list(char names[][VFS_NAME_LEN], unsigned char is_dir[], int max_entries);
+void vfs_gui_getcwd(char *out, int out_size);

@@ -5,22 +5,44 @@
 Монолитное (`docs/adr/0001`). Архитектура — UEFI/x86_64
 (`docs/adr/0002`, заменяет прежнюю BIOS/i386/GRUB).
 
+## Организация дерева исходников
+
+```text
+boot/uefi/        UEFI loader
+kernel/core/      kernel orchestration, state, panic, usermode foundation
+kernel/arch/      x86_64 entry/GDT/IDT/ISR/linker
+kernel/mm/        paging
+ drivers/         hardware/input/storage/graphics/timer/USB
+fs/vfs/           VFS core, mounts, filesystem registry
+fs/fat32/         FAT32 implementation
+gui/              GUI core + renderer/font boundary
+shell/            shell core + categorized commands
+lib/memory/       freestanding memory primitives
+assets/           wallpapers and fonts
+include/nexus/    shared headers
+platform/target/  hardware detection
+```
+
+The directory boundaries are organizational boundaries only. The current
+kernel remains monolithic and all linked kernel-side C modules execute in
+kernel context.
+
 ## Поток загрузки
 
 ```
 UEFI Firmware
-  → boot/efi/boot.c: efi_main(ImageHandle, SystemTable)
+  → boot/uefi/boot.c: efi_main(ImageHandle, SystemTable)
       1. GOP (Graphics Output Protocol) — получаем framebuffer
       2. открываем том, с которого загрузились, читаем \kernel.elf
-      3. парсим ELF64 (boot/efi/elf.h), раскладываем PT_LOAD-сегменты
+      3. парсим ELF64 (boot/uefi/elf.h), раскладываем PT_LOAD-сегменты
          по их физическим адресам (AllocatePages(AllocateAddress, ...))
       4. финальный GetMemoryMap(), ExitBootServices()
       5. прыгаем на entry point ядра с nexus_boot_info_t* в RDI
          (System V ABI — обычное соглашение GCC, а не MS x64 ABI,
          которым живёт сам бутлоадер, — граница ABI ровно на этом прыжке)
-  → arch/x86_64/entry.S: _start
+  → kernel/arch/x86_64/entry.S: _start
       свой стек (64 KiB), call kmain (rdi уже на месте)
-  → kernel/kernel.c: kmain(nexus_boot_info_t *boot_info)
+  → kernel/core/kernel.c: kmain(nexus_boot_info_t *boot_info)
       console_init() → gdt_init() → idt_init() → pic_remap() →
       pit_init(100) → keyboard_init() → размаскировать IRQ0/IRQ1 →
       ahci_init()+fat32_mount() (если диск есть) → shell_init() → sti
@@ -31,17 +53,17 @@ UEFI Firmware
 red zone запрещён по другой причине, calling convention другой), а
 ядро — обычный SysV ABI, как весь остальной Linux-мир. Граница между
 ними ровно в месте прыжка `kernel_entry(&boot_info)` в конце
-`boot/efi/boot.c` — после этого момента бутлоадер больше не
+`boot/uefi/boot.c` — после этого момента бутлоадер больше не
 исполняется, ABI-конфликта в runtime нет.
 
 ## Прерывания
 
 IDT на 48 векторов: 0-31 исключения CPU, 32-47 — IRQ0-15 после PIC
-remap (`drivers/pic/pic.c`). Общий ассемблерный стаб
-(`arch/x86_64/isr.S`) сохраняет регистры в `interrupt_frame_t`
-(layout зафиксирован в `arch/x86_64/idt.h` — при изменении стаба
+remap (`drivers/hardware/pic/pic.c`). Общий ассемблерный стаб
+(`kernel/arch/x86_64/isr.S`) сохраняет регистры в `interrupt_frame_t`
+(layout зафиксирован в `kernel/arch/x86_64/idt.h` — при изменении стаба
 менять оба места синхронно) и зовёт единый C-обработчик
-`isr_handler()` (`arch/x86_64/idt.c`), который либо паникует
+`isr_handler()` (`kernel/arch/x86_64/idt.c`), который либо паникует
 (vector < 32), либо диспетчеризует по номеру (32 = таймер,
 33 = клавиатура), либо просто шлёт EOI.
 
@@ -54,7 +76,7 @@ remap (`drivers/pic/pic.c`). Общий ассемблерный стаб
 
 ## Память
 
-**Свои page tables** (`mm/paging.c`, `docs/adr/0003`) — с Milestone 0.4
+**Свои page tables** (`kernel/mm/paging.c`, `docs/adr/0003`) — с Milestone 0.4
 ядро больше не полагается на таблицы, оставленные UEFI firmware.
 Схема пока та же по смыслу — identity map (виртуальный адрес ==
 физический), 2 MiB страницы (PS-бит в PD, без PT). Покрытие строится
@@ -63,7 +85,7 @@ EFI memory map (включая MMIO/reserved), затем framebuffer явно (
 гарантированно попадает в memory map тем же адресом). `paging_init()`
 вызывается из `kmain()` сразу после `idt_init()` — так page fault во
 время самой настройки паджинга хотя бы красиво диагностируется
-(vector 14, CR2 + расшифровка error code в `arch/x86_64/idt.c`), а не
+(vector 14, CR2 + расшифровка error code в `kernel/arch/x86_64/idt.c`), а не
 уходит в тройной fault.
 
 `nexus_boot_info_t` несёт полную EFI memory map (`kstate_mem_summary()`
@@ -76,7 +98,7 @@ EFI memory map (включая MMIO/reserved), затем framebuffer явно (
 
 ## Драйверы и связи между модулями
 
-`drivers/keyboard/keyboard.c` напрямую зовёт `shell_input_char()` —
+`drivers/input/keyboard/keyboard.c` напрямую зовёт `shell_input_char()` —
 то есть драйвер клавиатуры знает о существовании шелла. Это отличается
 от принципа "драйвер ничего не знает о том, кто его использует" из
 `docs/adr/0001` — но так было в исходном перенесённом проекте, и
@@ -87,7 +109,7 @@ EFI memory map (включая MMIO/reserved), затем framebuffer явно (
 
 ## Шелл и команды
 
-`kernel/shell/shell.c` + `kernel/shell/apps/*.c` — почти 50 команд,
+`shell/shell.c` + `shell/apps/*.c` — почти 50 команд,
 каждая как отдельная пара `.c`/`.h`. Все они выполняются **в контексте
 прерывания клавиатуры**, синхронно, в кольце 0 — не как процессы.
 Команда должна быть быстрой и не блокирующей (см. комментарий в шапке

@@ -51,13 +51,13 @@ make clean       # удалить build/ и iso/
   `file build/BOOTX64.EFI` показывает `PE32+ ... (EFI application)
   x86-64`
 - Зависание сразу после "Exiting boot services..." — скорее всего,
-  что-то не так в `arch/x86_64/entry.S` или в `gdt_init()`/`idt_init()`
+  что-то не так в `kernel/arch/x86_64/entry.S` или в `gdt_init()`/`idt_init()`
   до того, как консоль успела что-то напечатать; добавь
   `qemu-system-x86_64 ... -no-reboot -d int` для трассировки прерываний
-- Клавиатура не отвечает — `drivers/keyboard/keyboard.c` явно
+- Клавиатура не отвечает — `drivers/input/keyboard/keyboard.c` явно
   инициализирует контроллер i8042 (не просто читает порт), но если
   всё равно молчит — проверь, что PIC размаскировал IRQ1
-  (`kernel/kernel.c`: `pic_set_mask(i, i != 0 && i != 1)`)
+  (`kernel/core/kernel.c`: `pic_set_mask(i, i != 0 && i != 1)`)
 - `diskls`/`diskcat` говорят "не найден диск" — AHCI не нашёл
   SATA-контроллер или диск не на порту 0; это ожидаемо в минимальной
   QEMU-конфигурации без явно добавленного `-drive` для AHCI (диск

@@ -1,4 +1,4 @@
-/* NexusOS: свои page tables. Подробности контракта — mm/paging.h. */
+/* NexusOS: свои page tables. Подробности контракта — kernel/mm/paging.h. */
 #include <stdint.h>
 #include <stddef.h>
 #include "paging.h"

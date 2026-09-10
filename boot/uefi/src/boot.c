@@ -410,7 +410,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     boot_info.mmap.descriptor_size = desc_size;
     boot_info.mmap.descriptor_version = desc_version;
 
-    boot_progress(7, 7, u"Starting NexusOS 0.5.0 - Enstein");
+    boot_progress(7, 7, u"Starting NexusOS 0.5.1 - Desktop Update");
     status = g_bs->ExitBootServices(ImageHandle, map_key);
     if (EFI_ERROR(status)) {
         /* Карта могла устареть между вызовами (это нормально по спеке) —

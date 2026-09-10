@@ -49,7 +49,7 @@ toolchain/build-cross-compiler.sh, и теперь этот скрипт уда�
 - Реальная сборка **проверена в этой же сессии** конечным
   тулчейном (`gcc`/`ld` хоста, не sanity-check): и `BOOTX64.EFI`
   (PE32+, EFI application, x86-64), и `kernel.elf` (ELF64, entry
-  0x200000 — совпадает с `arch/x86_64/linker.ld`) слинковались без
+  0x200000 — совпадает с `kernel/arch/x86_64/linker.ld`) слинковались без
   единого warning'а. Живой бут в QEMU+OVMF всё равно не проверен —
   в песочнице разработки нет `qemu-system-x86_64`/OVMF/`mkfs.vfat`.
 - Milestone-структура ROADMAP.md больше не описывает реальный порядок
