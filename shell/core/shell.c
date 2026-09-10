@@ -146,6 +146,24 @@ static void redraw_line(const char *new_cmd) {
     g_len = i;
 }
 
+void shell_history_print(void) {
+    if (g_history_count == 0) {
+        console_print("No commands in history.\n");
+        return;
+    }
+
+    for (int i = g_history_count - 1; i >= 0; i--) {
+        const char *cmd = history_get(i);
+
+        if (cmd == 0 || cmd[0] == '\0') {
+            continue;
+        }
+
+        console_print(cmd);
+        console_putchar('\n');
+    }
+}
+
 void shell_history_prev(void) {
     if (g_history_pos + 1 >= g_history_count) {
         return; /* уже на самой старой команде (или истории вообще нет) */
