@@ -1,11 +1,30 @@
-# NexusOS
+# NexusOS 0.5.2 — System Foundation
+
+
+## Nexus System
+
+NexusOS 0.5.2 introduces a high-level **Nexus System** around the existing
+Nexus Kernel. The kernel remains a custom freestanding x86_64 ELF kernel; the
+new system layer owns system state, sessions, power policy, application
+registration and the `.nx` package foundation.
+
+The production disk image is a real GPT disk with three FAT32 partitions:
+
+```text
+BOOT      64 MiB   -> /boot
+SYSTEM    64 MiB   -> /system
+USERDATA  selected -> /userdata
+```
+
+Build an image with `./create-img.sh --userdata 1G`. The image builder is
+dependency-free beyond Python 3 and creates actual GPT/FAT32 structures.
 
 A standalone 64-bit operating system for x86_64, written primarily in C,
 with its own UEFI bootloader (without GRUB). NexusOS uses a monolithic
 kernel, custom GDT/IDT/PIC/PIT, PS/2 keyboard and mouse support, framebuffer
 graphics, AHCI + FAT32 storage, VFS, a graphical desktop, and a built-in CLI.
 
-> Current version: **0.5.1** — architecture-optimized source tree for future 0.5.2 development.
+> Current development version: **0.5.2 — System Foundation**
 
 ## 🌐 Languages
 
@@ -28,27 +47,9 @@ NexusOS boots through its own UEFI application, loads the kernel ELF image,
 exits UEFI boot services, and transfers control to the x86_64 kernel entry
 point. There is no GRUB or BIOS boot path in the current architecture.
 
-The kernel remains intentionally **monolithic**. The source tree is modular
-by subsystem, but these modules are linked into one kernel image and execute
-in kernel context until future user-mode work changes that model.
-
-### Module boundaries
-
-- `boot/uefi/` — UEFI loader and boot-only assets/headers
-- `kernel/core/` — kernel orchestration, state, panic and user-mode foundation
-- `kernel/arch/x86_64/` — architecture-specific entry, GDT, IDT, ISR and linker
-- `kernel/mm/` — paging and memory-management primitives
-- `drivers/` — hardware-facing device drivers
-- `fs/` — VFS and concrete filesystems
-- `gui/` — GUI state, rendering, desktop, input, search and applications
-- `shell/` — shell core, command registry and categorized commands
-- `lib/` — freestanding reusable primitives
-- `assets/` — replaceable static assets
-- `include/nexus/` — shared public NexusOS interfaces
-- `platform/` — platform/hardware detection helpers
-
-The module boundaries are organizational and dependency-oriented; they do
-not turn NexusOS into a microkernel.
+The current kernel is intentionally monolithic. GUI, shell, filesystem,
+driver, memory-management, and architecture code are separated by source
+directories, while remaining part of the same kernel image.
 
 ## Project Structure
 
@@ -65,116 +66,78 @@ NexusOS/
 │
 ├── boot/
 │   └── uefi/
-│       ├── src/
-│       │   └── boot.c
-│       ├── include/
-│       │   ├── efi.h
-│       │   └── elf.h
-│       └── assets/
-│           ├── nexus_logo.h
-│           └── nexus_logo.png
+│       ├── src/               # UEFI entry point and loader logic
+│       ├── include/           # UEFI-private headers
+│       └── assets/            # Bootloader assets
 │
 ├── kernel/
-│   ├── core/
-│   │   ├── kernel.c
-│   │   ├── kstate.c/h
-│   │   ├── panic.c/h
-│   │   └── usermode/
-│   ├── arch/
-│   │   └── x86_64/
-│   │       ├── entry.S
-│   │       ├── gdt.c/h
-│   │       ├── gdt_asm.S
-│   │       ├── idt.c/h
-│   │       ├── io.h
-│   │       ├── isr.S
-│   │       └── linker.ld
-│   ├── mm/
-│   │   └── paging.c/h
-│   └── bootmode/              # legacy module retained; not linked by default
+│   ├── core/                  # kmain, kernel state, panic, usermode foundation
+│   ├── arch/x86_64/           # GDT, IDT, ISR stubs, entry, linker script
+│   ├── mm/                    # Kernel paging / memory-management code
+│   └── bootmode/              # Existing boot-mode module (not part of the default link)
 │
 ├── drivers/
 │   ├── input/
 │   │   ├── keyboard/
 │   │   └── mouse/
-│   ├── graphics/framebuffer/
-│   ├── storage/
-│   ├── bus/
-│   ├── timer/
+│   ├── storage/               # AHCI/SATA
+│   ├── bus/                   # PCI
+│   ├── graphics/framebuffer/  # Framebuffer console
+│   ├── timer/                 # PIT
 │   ├── hardware/
 │   │   ├── cpu/
 │   │   └── pic/
-│   └── usb/
+│   └── usb/                   # xHCI
 │
 ├── fs/
 │   ├── vfs/
-│   │   ├── core/
-│   │   ├── mount/
-│   │   └── registry/
-│   └── fat32/
-│       ├── fat32.c
-│       └── fat32.h
+│   │   ├── core/              # RAM-backed VFS and GUI-facing VFS API
+│   │   ├── mount/             # Mount namespace
+│   │   └── registry/          # Filesystem registry
+│   └── fat32/                 # FAT32 filesystem implementation
 │
 ├── gui/
-│   ├── core/
-│   │   ├── gui.c
-│   │   ├── gui.h
-│   │   ├── gui_state.c
-│   │   └── gui_state.h
-│   ├── desktop/
-│   ├── apps/
-│   │   ├── files/
-│   │   ├── terminal/
-│   │   └── settings/
-│   ├── input/
-│   ├── renderer/
-│   │   ├── renderer.c/h
-│   │   └── font.c/h
-│   └── search/
+│   ├── core/                  # Desktop state and GUI orchestration
+│   └── renderer/              # Font abstraction / rendering support
 │
 ├── shell/
-│   ├── core/
-│   │   ├── shell.c/h
-│   │   └── command_registry.c/h
+│   ├── core/                  # Shell parser/input/command dispatch
 │   └── commands/
-│       ├── system/
-│       ├── filesystem/
-│       └── utilities/
+│       ├── system/            # System and hardware commands
+│       ├── filesystem/        # Filesystem commands
+│       └── utilities/         # General utilities and math/text commands
 │
 ├── lib/
-│   └── memory/
+│   └── memory/                # Freestanding memory primitives
 │
 ├── assets/
 │   ├── wallpapers/
 │   └── fonts/
 │
 ├── include/
-│   └── nexus/
+│   └── nexus/                 # Shared/public NexusOS headers
 │
 ├── platform/
-│   └── target/
+│   └── target/                # Hardware/platform detection
 │
-├── userdata/
+├── userdata/                  # Runtime/user-data layout
 │
 └── docs/
+    ├── architecture/
+    ├── development/
+    ├── releases/
+    ├── adr/
+    ├── i18n/
     ├── STATUS.md
     ├── ARCHITECTURE.md
     ├── BUILDING.md
     ├── BUILD_SCRIPT.md
     ├── ROADMAP.md
-    ├── VERSIONING.md
-    ├── AI_HANDOFF.md
-    ├── TARGET_HARDWARE.md
-    ├── MOUNT_POINTS.md
-    ├── architecture/
-    ├── development/
-    ├── releases/
-    ├── adr/
-    └── i18n/
+    └── VERSIONING.md
 ```
 
 `build/` and `iso/` are generated directories and are intentionally not part
-of the source archive.
+of the source tree.
 
 ## Building
 
@@ -218,17 +181,9 @@ See [docs/BUILDING.md](docs/BUILDING.md) and
 
 ## Current Desktop
 
-The 0.5.1 release includes the graphical desktop, Files, Terminal,
+The 0.5.2 development target includes the graphical desktop, Files, Terminal,
 Settings, Nexus Menu, Desktop Search, PS/2 mouse interaction, and keyboard
-navigation. The GUI is now split into state/core, renderer, desktop, input,
-search and application modules without changing the public `gui_*` API.
-
-## Shell
-
-The existing shell command implementations remain in their functional
-categories. `shell/core/command_registry.c` owns the command table and
-routing, so adding a command does not require growing a large `if/else`
-chain in the shell input loop.
+navigation. The existing CLI remains available through `desktop-run`.
 
 ## Development Notes
 

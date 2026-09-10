@@ -30,7 +30,7 @@ warn() { printf '%s!%s  %s\n' "$YELLOW" "$RESET" "$*"; }
 FULLSCREEN=1
 USE_KVM=1
 MEM_MB=256
-DISK_IMG="build/fat.img"
+DISK_IMG="NexusOS.img"
 REBUILD=0
 
 usage() {
@@ -40,7 +40,8 @@ usage() {
     printf '  --no-kvm        disable KVM acceleration\n'
     printf '  --mem   MB      RAM in MiB (default: %d)\n' "$MEM_MB"
     printf '  --img   PATH    disk image to boot (default: %s)\n' "$DISK_IMG"
-    printf '  --rebuild       recreate the disk image before booting\n'
+    printf '  --rebuild       recreate the GPT disk image before booting
+  NEXUS_USERDATA_SIZE=2G ./run.sh  # default image USERDATA size override\n'
     printf '  --help          show this help\n'
     exit 0
 }
@@ -107,7 +108,7 @@ if [[ "$REBUILD" -eq 1 || ! -f "$DISK_IMG" ]]; then
     else
         warn "Disk image not found: $DISK_IMG — creating it now"
     fi
-    bash create-img.sh --out "$DISK_IMG" \
+    bash create-img.sh --userdata "${NEXUS_USERDATA_SIZE:-1G}" --out "$DISK_IMG" \
         || die "create-img.sh failed"
 fi
 

@@ -3,7 +3,7 @@
 
 #include "boot_info.h"
 
-/* Public GUI lifecycle and input API. Hardware-specific input remains in drivers. */
+/* Keyboard-only GUI controls for now. */
 #define GUI_KEY_ESCAPE    27
 #define GUI_KEY_ENTER     10
 #define GUI_KEY_LEFT      0x81

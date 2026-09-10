@@ -1,8 +1,8 @@
 /* NexusOS kernel — kmain.
  *
- * На входе: boot services уже мертвы, framebuffer доступен напрямую.
- * Собственные page tables устанавливаются ранним этапом и заменяют
- * зависимость от таблиц, оставленных UEFI. */
+ * На входе: boot services уже мертвы, framebuffer доступен напрямую,
+ * paging — тот, что оставила прошивка (identity-map). Своя MMU-настройка —
+ * следующий милстоун. */
 #include <stdint.h>
 #include "boot_info.h"
 #include "console.h"
@@ -12,11 +12,9 @@
 #include "pic.h"
 #include "kstate.h"
 #include "shell.h"
-#include "mount.h"
 #include "pit.h"
 #include "pci.h"
 #include "ahci.h"
-#include "fat32.h"
 #include "keyboard.h"
 #include "gui.h"
 #include "usermode.h"
@@ -24,6 +22,7 @@
 #include "mouse.h"
 #include "target.h"
 #include "nexus_version.h"
+#include "system.h"
 
 void kmain(nexus_boot_info_t *boot_info) {
     console_init(&boot_info->fb);
@@ -86,18 +85,23 @@ void kmain(nexus_boot_info_t *boot_info) {
     pci_scan();
     console_status_ok();
 
-    console_print("Probing AHCI disk (SATA, port 0, LBA 0)");
-    if (ahci_init() && fat32_mount(0)) {
+    console_print("Probing AHCI disk (SATA)");
+    if (ahci_init()) {
         console_status_ok();
-        vfs_mount("ahci0p0", "/mnt/disk0", "fat32", VFS_MOUNT_RDONLY);
-        console_set_color(COLOR_CYAN, COLOR_BLACK);
-        console_print("  -> FAT32 mounted at /mnt/disk0, try 'diskls'\n");
-        console_set_color(COLOR_WHITE, COLOR_BLACK);
+        console_print("  -> AHCI block device ready\n");
     } else {
         console_status_warn();
-        console_set_color(COLOR_YELLOW, COLOR_BLACK);
-        console_print("  -> no disk found, diskls/diskcat won't work, everything else is fine\n");
-        console_set_color(COLOR_WHITE, COLOR_BLACK);
+        console_print("  -> no AHCI disk found; storage services will remain offline\n");
+    }
+    console_print("\n");
+
+    console_print("Starting Nexus System");
+    if (nexus_system_init()) {
+        console_status_ok();
+        console_print("  -> Nexus System initialized\n");
+    } else {
+        console_status_warn();
+        console_print("  -> Nexus System initialization degraded; continuing with local services\n");
     }
     console_print("\n");
 

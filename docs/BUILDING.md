@@ -1,30 +1,23 @@
-# BUILDING.md
+# Building NexusOS 0.5.2
 
-## Toolchain
+## Requirements
 
-На x86_64 Linux отдельный cross-compiler не требуется. Текущий build использует
-обычный `gcc`/`ld`:
+Kernel/bootloader build:
 
-- UEFI loader — PE32+ x86-64 через `ld -m i386pep`
-- Kernel — freestanding ELF64 x86-64
+- x86_64 Linux
+- GCC
+- GNU binutils
+- GNU Make
+- Python 3 for the dependency-free image builder
 
-## Dependencies
+QEMU runtime additionally requires:
 
-Для обычной сборки:
+- `qemu-system-x86_64`
+- OVMF firmware
 
-- `gcc`
-- `binutils`
-- `make`
+The project does not require CMake, a C++ compiler, or a kernel libc.
 
-Для QEMU/image workflow:
-
-```bash
-sudo apt install qemu-system-x86 ovmf dosfstools mtools
-```
-
-Нужны `qemu-system-x86_64`, OVMF, `mkfs.vfat`, `mcopy` и `mmd`.
-
-## Build commands
+## Build
 
 ```bash
 make clean
@@ -32,68 +25,56 @@ make
 make iso
 ```
 
-Или:
+The compatibility `iso/` staging area contains the EFI bootloader and a legacy
+copy of `kernel.elf`. The production disk image is created separately by
+`create-img.sh`.
 
-```bash
-./build.sh
-```
-
-Количество параллельных jobs:
+The parallel frontend can be used with:
 
 ```bash
 NEXUS_BUILD_JOBS=8 ./build.sh
 ```
 
-Инкрементальная сборка:
+## Disk image
+
+Interactive:
 
 ```bash
-./build.sh --no-clean
+./create-img.sh
 ```
 
-Проверка C-синтаксиса:
+Non-interactive:
 
 ```bash
-make check
+./create-img.sh --userdata 512M
+./create-img.sh --userdata 1G
+./create-img.sh --userdata 2G
+./create-img.sh --userdata 4G
+./create-img.sh --userdata 10G
 ```
 
-Запуск:
+The resulting `NexusOS.img` is a real GPT image with three real FAT32
+partitions. `tools/create-fat32.py` is used when host `dosfstools`/`mtools`
+are unavailable, so image creation does not silently fall back to a single
+folder-backed image.
+
+## Run
 
 ```bash
-make run
-# или
 ./run.sh
 ```
 
-## What each target does
-
-- `make` — собирает `build/BOOTX64.EFI` и `build/kernel.elf`
-- `make iso` — добавляет UEFI ESP layout в `iso/`
-- `make run` — запускает существующий QEMU frontend
-- `make clean` — удаляет generated `build/` и `iso/`
-- `make check` — делает `-fsyntax-only` по kernel-side C и UEFI C
-
-## Debugging
-
-Если UEFI Shell появляется вместо NexusOS, проверь:
-
-```text
-iso/EFI/BOOT/BOOTX64.EFI
-```
-
-и:
+or:
 
 ```bash
-file build/BOOTX64.EFI
-file build/kernel.elf
+./run.sh --window
+./run.sh --no-kvm
+./run.sh --mem 512
+./run.sh --rebuild
 ```
 
-Если зависание происходит сразу после выхода из boot services, смотри
-`kernel/arch/x86_64/entry.S`, GDT, IDT и раннюю инициализацию paging.
+Set the default USERDATA size for automatic image creation with:
 
-Если keyboard не отвечает, смотри `drivers/input/keyboard/keyboard.c` и
-PIC IRQ1. GUI keyboard handling теперь находится выше драйвера в
-`gui/input/input.c`.
-
-Если `diskls`/`diskcat` не видят диск, это отдельный AHCI path; FAT image,
-который QEMU использует для загрузки, не автоматически означает, что NexusOS
-видит тот же storage controller через AHCI.
+```bash
+NEXUS_USERDATA_SIZE=2G ./run.sh
+```

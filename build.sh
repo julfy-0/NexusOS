@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -u
 
-# NexusOS 0.5.1 — parallel build frontend
+# NexusOS 0.5.2 — parallel build frontend
 # The Makefile remains the source of truth; this script only provides the
 # readable progress dashboard and job-count control.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-VERSION="0.5.1"
+VERSION="0.5.2"
 BAR_WIDTH=24
 JOBS="${NEXUS_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 2)}"
 [[ "$JOBS" =~ ^[0-9]+$ ]] || JOBS=2
@@ -48,7 +48,7 @@ map_obj() {
 
 KERNEL_OUTPUTS=()
 while IFS= read -r f; do KERNEL_OUTPUTS+=("$(map_obj "$f")"); done \
-    < <(find kernel fs lib gui shell platform -type f \( -name '*.c' -o -name '*.S' \) ! -path 'kernel/bootmode/*' | sort)
+    < <(find kernel drivers fs lib gui shell system platform -type f \( -name '*.c' -o -name '*.S' \) ! -path 'kernel/bootmode/*' | sort)
 KERNEL_OUTPUTS+=("build/assets/wallpapers/nexus_default.o" "build/kernel.elf")
 
 DRIVER_OUTPUTS=()

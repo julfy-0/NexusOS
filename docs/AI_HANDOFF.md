@@ -1,55 +1,56 @@
-# AI_HANDOFF.md — инструкция для любой нейронки, продолжающей NexusOS
+# NexusOS AI Handoff
 
-Этот проект передаётся между AI-сессиями. Перед изменением кода обязательно
-сверяй фактическое дерево и документы, а не восстанавливай структуру по памяти.
+## Current baseline
 
-## Перед тем как писать код
+NexusOS is an existing x86_64 freestanding C operating system with a custom
+UEFI bootloader and monolithic kernel. Do not replace it with a demo or rewrite
+working subsystems.
 
-1. Прочитай `docs/STATUS.md`.
-2. Прочитай `docs/ROADMAP.md`.
-3. Прочитай `docs/ARCHITECTURE.md`.
-4. Прочитай соответствующие ADR в `docs/adr/`.
-5. Прочитай `README.md` и `docs/BUILDING.md`.
-6. Если задача затрагивает GUI — сначала смотри `gui/core/gui_state.h` и
-   границы `gui/desktop`, `gui/input`, `gui/renderer`, `gui/search`, `gui/apps`.
-7. Если задача затрагивает shell — сначала смотри
-   `shell/core/command_registry.c` и категорию команды.
+## Current architecture
 
-## Архитектурные правила
+```text
+boot/uefi        UEFI loader
+kernel/          kernel and x86_64 architecture
+ drivers/        hardware
+fs/              GPT, VFS and FAT32
+system/          high-level Nexus System services
+gui/             existing desktop implementation
+shell/           existing shell and commands
+assets/          source assets
+include/nexus/   shared contracts
+```
 
-- NexusOS остаётся монолитным ядром. Не превращай организационное разделение
-  директорий в микрокernel без отдельного ADR.
-- Не удаляй рабочие подсистемы ради "чистой" структуры.
-- Один самостоятельный модуль по возможности имеет пару `.c`/`.h`.
-- Hardware drivers не должны знать о конкретных GUI-приложениях.
-- GUI rendering не должен содержать PS/2 hardware policy.
-- Shell input/history не должен содержать огромную таблицу dispatch; для этого
-  существует command registry.
-- Конкретная файловая система должна оставаться под `fs/`, а VFS — над ней.
-- Ассемблер используется только там, где он реально нужен.
-- Kernel остаётся freestanding: без обязательной libc и без C++.
+## Important invariants
 
-## Версия
+- `kernel.elf` remains the kernel artifact.
+- UEFI remains the boot mechanism.
+- No GRUB.
+- Kernel remains freestanding C.
+- Existing CLI, GUI, PS/2 input, VFS, FAT32 and AHCI functionality must be
+  preserved.
+- `.nx` is metadata/package infrastructure only until an executable model is
+  designed.
+- BOOT/SYSTEM/USERDATA is a real GPT layout, not three folders in one image.
 
-Текущий release: **0.5.1**. Архитектурная подготовка к 0.5.2 не является
-автоматическим bump версии. Не меняй `include/nexus/nexus_version.h` только
-из-за реорганизации.
+## Image layout
 
-## После изменения кода
+```text
+BOOT      64 MiB FAT32  -> /boot
+SYSTEM    64 MiB FAT32  -> /system
+USERDATA  configurable -> /userdata
+```
 
-1. Запусти `make clean`.
-2. Запусти `make`.
-3. Запусти `make iso`.
-4. При наличии окружения проверь `make run`.
-5. При изменении C-модулей дополнительно запусти `make check`.
-6. Обнови документацию только по фактическому состоянию.
-7. Если принято новое концептуальное архитектурное решение — добавь ADR.
+The UEFI loader finds SYSTEM through its GPT partition type and loads
+`SYSTEM/KERNEL/KERNEL.ELF`. A fallback to the old BOOT-root `kernel.elf` exists
+for migration safety.
 
-## Что нельзя делать
+## Build
 
-- Не создавать NexusOS заново.
-- Не заменять проект demo-кодом.
-- Не переходить на CMake только ради удобства.
-- Не удалять UEFI bootloader, kernel, CLI, desktop, VFS, FAT32, AHCI,
-  PS/2 drivers или build scripts без отдельной причины и ADR.
-- Не объявлять функциональность работающей, если она только компилируется.
+```bash
+make clean
+make
+make iso
+./build.sh
+./create-img.sh --userdata 1G
+./run.sh
+```

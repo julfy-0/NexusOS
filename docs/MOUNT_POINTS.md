@@ -1,42 +1,33 @@
-# NexusOS VFS mount points
+# NexusOS mount points
 
-NexusOS has a mount namespace independent from the physical storage drivers.
-
-## Default namespace
+The VFS namespace is now aligned with the Nexus System disk layout.
 
 ```text
-/          rootfs    nexusfs
-/dev       devfs
-/proc      procfs
-/sys       sysfs
-/tmp       tmpfs
-/mnt/disk0  fat32    (created automatically when AHCI + FAT32 are detected)
+/             rootfs
+/dev          devfs
+/proc         procfs
+/sys          sysfs
+/tmp          tmpfs
+/boot         BOOT FAT32 partition
+/system       SYSTEM FAT32 partition
+/userdata     USERDATA FAT32 partition
+/mnt/disk0    compatibility alias for BOOT
 ```
 
-`/mnt/disk0` is a mount-table entry for the existing read-only FAT32 driver; it does not yet make the existing `diskls` path parser operate through VFS.
+The physical FAT32 implementation is read-only, but multiple FAT32 mount
+contexts can be active at once. GPT discovery selects the partition LBA and
+assigns a backend slot before registering its VFS mount.
 
-## Shell commands
+`/userdata` is the persistent user-data namespace. The image builder creates:
 
 ```text
-mount
-mount <source> <target> <fstype>
-umount <target>
-mounts
+/users
+/home
+/apps
+/packages
+/downloads
+/documents
+/config
 ```
 
-Examples:
-
-```text
-NexusOS> mount
-NexusOS> mount nvme0p1 /home fat32
-NexusOS> umount /home
-```
-
-The namespace supports longest-prefix resolution, so `/dev/usb` resolves to `/dev` while `/dev/usb/hid` remains under the same mount.
-
-The next storage step is to connect the VFS mount layer to real block devices and filesystem drivers (NVMe/AHCI + FAT32/NexusFS).
-
-
-## 0.5: path traversal
-
-Mounted filesystems are now visible through the normal VFS path API: `cd /mnt/disk0`, `pwd`, `ls`, and `cat /mnt/disk0/<file>` dispatch into the mounted FAT32 backend. The FAT32 backend remains read-only.
+inside USERDATA.

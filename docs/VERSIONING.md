@@ -1,69 +1,14 @@
-# VERSIONING.md — как мы version-им NexusOS
+# NexusOS Versioning
 
-Обычный SemVer здесь используется как ориентир для release-совместимости,
-но фактическое развитие NexusOS привязано к milestone-ам и ADR. Версия
-привязана к ROADMAP.md, а не к произвольным изменениям.
+Current development target: **0.5.2 — System Foundation**.
 
-## Формат
+The code version is defined in:
 
-```
-MAJOR.MINOR.PATCH-codename
+```text
+include/nexus/nexus_version.h
 ```
 
-Пример текущей версии: **0.5.1**
+The project uses semantic `MAJOR.MINOR.PATCH` numbers plus a human-readable
+display label. Documentation and release notes should match the code version.
 
-### MAJOR
-`0` — пока система не проходит порог "самодостаточной ОС". Переход
-к `1.0.0` — отдельное решение, зафиксированное ADR, не автоматика.
-
-### MINOR
-Обычно +1 за каждый закрытый Milestone из `docs/ROADMAP.md`.
-**Исключение**: скачок 0.1 → 0.3 (минуя 0.2) — это не пропущенный
-milestone, а архитектурный пивот (BIOS/i386 → UEFI/x86_64, см.
-`docs/adr/0002`), после которого старая нумерация milestone'ов
-перестала соответствовать реальности. Такие немилстоуновые скачки —
-всегда по отдельному ADR, не тихо.
-
-### PATCH
-Багфикс/мелкое изменение внутри текущего milestone. Сбрасывается
-в 0 при увеличении MINOR.
-
-### codename
-Своё кодовое имя на каждый MINOR — не техническое, просто для
-удобства ссылаться на "эпоху" без запоминания номеров.
-
-## Где хранится текущая версия
-
-Источник истины — `docs/STATUS.md` (верхняя строка). С 0.4.4 версия
-также продублирована в коде: `include/nexus/nexus_version.h`
-(`NEXUS_VERSION_STRING`) — его подключают команды `version`/`neofetch`/
-`uname`, чтобы не хардкодить строку в каждой по отдельности (как было
-раньше — три места, три разных значения). Меняешь версию в
-`STATUS.md` — обнови и этот заголовок в том же коммите, иначе они
-разъедутся снова.
-(До пивота дублировалось в `kernel/kernel.h` — этот файл удалён при
-переносе на UEFI/x86_64, т.к. был специфичен под старую архитектуру
-и ничем не использовался.)
-
-## Когда обновлять что
-
-| Событие                                            | Что меняется         |
-|------------------------------------------------------|-----------------------|
-| Мелкий фикс / новый драйвер внутри milestone          | PATCH +1              |
-| Milestone из ROADMAP.md закрыт и забучен              | MINOR +1, PATCH → 0, новый codename |
-| Архитектурный пивот (не milestone, а замена основ)    | MINOR скачком + ADR, PATCH → 0, новый codename |
-| Система признана "самодостаточной ОС" (ADR)          | MAJOR → 1, MINOR/PATCH → 0 |
-
-## Список кодовых имён
-
-| Версия | Codename | Что это                                    |
-|--------|----------|----------------------------------------------|
-| 0.1    | genesis  | BIOS/i386/GRUB Multiboot — **архивная ветка**, заменена пивотом (docs/adr/0002) |
-| 0.3    | refit    | UEFI/x86_64 пивот — историческая основа текущей архитектуры |
-| 0.4    | memoria  | Своя виртуальная память, paging, heap        |
-| 0.5    | Enstein  | VFS path traversal + mount-backed FAT32       |
-| 0.5.1  | Desktop Update | Graphical desktop and GUI integration    |
-| 0.5.2  | (future) | Architecture stabilization / maintenance     |
-| 0.6    | threadwork | Многозадачность, планировщик                 |
-| 0.7    | descent  | Syscalls, переход в ring 3, шелл в userspace  |
-| 0.8+   | (придумаем ближе к делу) | —                        |
+The codename **Enstein** is retained from the existing project version history.

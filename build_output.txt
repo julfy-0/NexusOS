@@ -1,3 +1,8 @@
 ==> UEFI bootloader: build/BOOTX64.EFI
-==> Kernel: build/kernel.elf
-==> ESP staged in iso/
+shell/core/command_registry.c: In function ‘command_history’:
+shell/core/command_registry.c:159:55: error: implicit declaration of function ‘shell_history_print’; did you mean ‘shell_history_prev’? [-Wimplicit-function-declaration]
+  159 | static void command_history(char *args) { (void)args; shell_history_print(); }
+      |                                                       ^~~~~~~~~~~~~~~~~~~
+      |                                                       shell_history_prev
+make: *** [Makefile:80: build/shell/core/command_registry.o] Error 1
+make: *** Waiting for unfinished jobs....

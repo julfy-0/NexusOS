@@ -243,7 +243,7 @@ typedef struct {
     void *CloseProtocol;
     void *OpenProtocolInformation;
     void *ProtocolsPerHandle;
-    void *LocateHandleBuffer;
+    EFI_STATUS (EFIAPI *LocateHandleBuffer)(uint32_t SearchType, EFI_GUID *Protocol, VOID *SearchKey, UINTN *NoHandles, EFI_HANDLE **Buffer);
     EFI_LOCATE_PROTOCOL LocateProtocol;
     /* дальше есть ещё поля, но нам они пока не нужны */
 } EFI_BOOT_SERVICES;
@@ -308,6 +308,44 @@ typedef struct {
 
 #define EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID \
     { 0x9042a9de, 0x23dc, 0x4a38, { 0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a } }
+
+/* ---- Block I/O Protocol (GPT partition discovery) ---- */
+
+typedef struct {
+    uint32_t MediaId;
+    BOOLEAN RemovableMedia;
+    BOOLEAN MediaPresent;
+    BOOLEAN LogicalPartition;
+    BOOLEAN ReadOnly;
+    BOOLEAN WriteCaching;
+    uint32_t BlockSize;
+    uint32_t IoAlign;
+    uint64_t LastBlock;
+    uint64_t LowestAlignedLba;
+    uint32_t LogicalBlocksPerPhysicalBlock;
+    uint32_t OptimalTransferLengthGranularity;
+    uint8_t PartitionTypeGUID[16];
+    uint8_t PartitionGUID[16];
+    uint64_t PartitionStartingLba;
+    uint64_t PartitionSize;
+} EFI_BLOCK_IO_MEDIA;
+
+typedef EFI_STATUS (EFIAPI *EFI_BLOCK_READ)(
+    IN void *This, IN uint32_t MediaId, IN uint64_t Lba,
+    IN UINTN BufferSize, OUT VOID *Buffer);
+
+typedef struct {
+    uint64_t Revision;
+    EFI_BLOCK_IO_MEDIA *Media;
+    EFI_BLOCK_READ ReadBlocks;
+    void *WriteBlocks;
+    void *FlushBlocks;
+} EFI_BLOCK_IO_PROTOCOL;
+
+#define EFI_BLOCK_IO_PROTOCOL_GUID \
+    { 0x964e5b21, 0x6459, 0x11d2, { 0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b } }
+
+#define ByProtocol 2u
 
 /* ---- Loaded Image Protocol (чтобы узнать, с какого устройства мы сами загрузились) ---- */
 

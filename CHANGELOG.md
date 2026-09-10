@@ -1,14 +1,16 @@
+# Changelog
+
+## 0.5.2 — System Foundation
+
+- Added the Nexus System Core and explicit runtime states.
+- Added GPT partition discovery and multi-context FAT32 mounts.
+- Added real BOOT/SYSTEM/USERDATA GPT image generation.
+- Moved kernel loading to SYSTEM with a safe legacy BOOT fallback.
+- Added session, power, system-info, package-manager and app-manager foundations.
+- Added `.nx` package manifest format foundation without fake executable loading.
+- Preserved the existing kernel, bootloader, CLI, GUI, input, VFS, FAT32 and AHCI paths.
+
 # CHANGELOG.md
-
-## 0.5.1 — post-release architecture preparation
-
-- Preserved the existing NexusOS 0.5.1 release version; no version bump.
-- Split the existing GUI implementation into core/state, renderer, desktop, input, search and application modules while keeping the public `gui_*` API.
-- Moved FAT32 sources into `fs/fat32/`.
-- Added `shell/core/command_registry.c/h` and moved command routing out of the shell input editor without removing existing commands.
-- Synchronized the architecture/build/status/roadmap/handoff documentation with the actual source tree.
-- Added ADR 0004 documenting the new GUI and shell module boundaries.
-- Verified the reorganized project with the existing Makefile/UEFI build workflow.
 
 ## [0.5.1] — Desktop Update
 

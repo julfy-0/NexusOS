@@ -1,4 +1,4 @@
-# NexusOS 0.5.1 — unified freestanding build
+# NexusOS 0.5.2 — unified freestanding build
 #
 # The source tree is organized by subsystem. Object files mirror the source
 # paths under build/, which prevents filename collisions as the project grows.
@@ -18,7 +18,7 @@ ISODIR := iso
 # Every kernel-side module gets access to its own directory plus the shared
 # public headers. This keeps source includes short and avoids fragile
 # ../../ paths when modules move.
-MODULE_DIRS := $(shell find kernel drivers fs lib gui shell platform -type d 2>/dev/null | sort)
+MODULE_DIRS := $(shell find kernel drivers fs lib gui shell system platform -type d 2>/dev/null | sort)
 INCLUDES := -Iinclude/nexus $(addprefix -I,$(MODULE_DIRS)) -Iassets/fonts
 
 # --- UEFI bootloader: freestanding PE32+, MS x64 ABI ---
@@ -35,7 +35,7 @@ CFLAGS_KERNEL := -ffreestanding -fno-stack-protector -fno-stack-check \
                  -Wall -Wextra -O2 $(INCLUDES) -c
 LDFLAGS_KERNEL := -nostdlib -static -T kernel/arch/x86_64/linker.ld
 
-KERNEL_C_SRCS := $(shell find kernel drivers fs lib gui shell platform -type f -name '*.c' ! -path 'kernel/bootmode/*' 2>/dev/null | sort)
+KERNEL_C_SRCS := $(shell find kernel drivers fs lib gui shell system platform -type f -name '*.c' ! -path 'kernel/bootmode/*' 2>/dev/null | sort)
 KERNEL_S_SRCS := $(shell find kernel/arch/x86_64 -type f -name '*.S' 2>/dev/null | sort)
 
 KERNEL_C_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERNEL_C_SRCS))
@@ -114,7 +114,7 @@ run: iso
 
 check:
 	@set -e; \
-	for f in $$(find kernel drivers fs lib gui shell platform -type f -name '*.c' ! -path 'kernel/bootmode/*' | sort); do \
+	for f in $$(find kernel drivers fs lib gui shell system platform -type f -name '*.c' ! -path 'kernel/bootmode/*' | sort); do \
 		$(CC) $(CFLAGS_KERNEL) -fsyntax-only "$$f"; \
 	done
 	@echo "==> Kernel-side C syntax: OK"
