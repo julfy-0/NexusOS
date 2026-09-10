@@ -1,20 +1,29 @@
-# NexusOS build.sh
+# BUILD_SCRIPT.md
 
-`build.sh` is the pretty command-line build frontend for NexusOS 0.5.1.
+`build.sh` — frontend над существующим GNU Make. Это не отдельная build system.
+Текущая версия проекта остаётся 0.5.1.
 
-Run from the project root:
+Запуск:
 
 ```sh
 ./build.sh
 ```
 
-For an incremental build without removing `build/` and `iso/` first:
+Инкрементально:
 
 ```sh
 ./build.sh --no-clean
 ```
 
-The four progress lines represent build artifact groups:
+Количество jobs:
+
+```sh
+NEXUS_BUILD_JOBS=8 ./build.sh
+```
+
+## Progress model
+
+Dashboard tracks actual generated artifacts:
 
 ```text
 Kernel       [################........]  66%
@@ -23,9 +32,16 @@ Bootloader   [########################] 100%
 OS           [########################] 100%
 ```
 
-The bars are derived from real object/final-output files under `build/` and `iso/`. `OS` is the overall completion ratio across the complete build artifact set. The script is a frontend over the existing Makefile, not a separate build system.
+- `Kernel` — kernel-side object/final outputs
+- `Drivers` — driver objects
+- `Bootloader` — UEFI loader objects + EFI output
+- `OS` — overall ratio across the complete output set
 
+The script does not invent time-based percentages. A target is counted when
+its expected output file exists.
 
-### Parallel build
+## Source of truth
 
-`build.sh` runs GNU Make with multiple jobs (`NEXUS_BUILD_JOBS` can override the worker count). The four progress bars update together while compilation is happening. `OS` is the overall percentage of the complete build artifact set, not a separate fake stage.
+The Makefile remains authoritative for dependency discovery and actual build
+commands. The frontend only selects parallelism, starts the build and renders
+status.

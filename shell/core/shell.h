@@ -3,6 +3,9 @@
 
 void shell_init(void);
 
+/* Prints the current shell command history for the command registry. */
+void shell_history_print(void);
+
 /* Вызывается драйвером клавиатуры на каждый напечатанный символ.
  * Шелл сам занимается эхом на экран, буферизацией строки и построчным
  * разбором команд по Enter. */

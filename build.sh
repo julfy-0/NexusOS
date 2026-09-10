@@ -48,7 +48,7 @@ map_obj() {
 
 KERNEL_OUTPUTS=()
 while IFS= read -r f; do KERNEL_OUTPUTS+=("$(map_obj "$f")"); done \
-    < <(find kernel drivers fs lib gui shell platform -type f \( -name '*.c' -o -name '*.S' \) ! -path 'kernel/bootmode/*' | sort)
+    < <(find kernel fs lib gui shell platform -type f \( -name '*.c' -o -name '*.S' \) ! -path 'kernel/bootmode/*' | sort)
 KERNEL_OUTPUTS+=("build/assets/wallpapers/nexus_default.o" "build/kernel.elf")
 
 DRIVER_OUTPUTS=()

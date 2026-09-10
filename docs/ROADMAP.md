@@ -1,78 +1,95 @@
 # ROADMAP.md — путь развития NexusOS
 
-После пивота на UEFI/x86_64 (`docs/adr/0002`) готовые куски не идут
-строго по порядку старого плана genesis→memoria→threadwork→archive→
-descent — импортированный проект принёс "archive" (диск+FAT32) раньше
-"memoria" (paging) и "threadwork" (многозадачность). Ниже — актуальный
-план от текущей точки, а не воображаемая линейная последовательность.
+Этот roadmap отражает фактическое состояние кода. Версии не меняются только
+из-за реорганизации дерева: текущий release остаётся **0.5.1**.
 
-## Milestone 0.3 — refit (закрыт) — UEFI/x86_64 пивот
+## Milestone 0.3 — refit — закрыт
 
-- [x] Перенос всего кода в новую структуру, реальная сборка проверена
-- [x] **Живой бут в QEMU+OVMF подтверждён** — шелл и команды проверены
+- [x] UEFI/x86_64 pivot
+- [x] Собственная UEFI-загрузка и long-mode kernel
+- [x] Реальная сборка и живой QEMU+OVMF boot
 
-## Milestone 0.4 — memoria (Virtual Memory)
+## Milestone 0.4 — memoria — частично закрыт
 
-## Milestone 0.5 — Enstein (VFS path traversal) — текущий
+- [x] Собственные page tables
+- [x] Page fault handler
+- [ ] `kmalloc`/`kfree`
+- [ ] Higher-half kernel
 
-Сейчас работает identity-map, оставленный UEFI firmware — это не
-"настоящая" виртуальная память, а просто то, что было до нас.
+## Milestone 0.5 — Enstein — закрыт функционально
 
-- [ ] Свои page tables (4-уровневая схема x86_64: PML4/PDPT/PD/PT)
-- [ ] Higher-half kernel (переезд с 0x200000 на что-то вроде
-      0xFFFFFFFF80000000) — сейчас не критично, но нужно перед
-      настоящим user/kernel split
-- [ ] Page fault handler (vector 14) с осмысленной диагностикой —
-      сейчас все исключения 0-31 просто ведут в panic_screen()
-- [ ] `kmalloc`/`kfree` — heap ядра на основе page allocator +
-      реальной физической memory map (она уже приходит от UEFI
-      через `nexus_boot_info_t.mmap`, см. `kstate_mem_summary()`
-      в `kernel/core/kstate.c` — уже читает её, просто не строит из этого
-      allocator)
+- [x] VFS path traversal
+- [x] `/mnt` и `/mnt/disk0` namespace
+- [x] FAT32 mount/read path
+- [x] Read-only FAT32 mount protection
 
-## Milestone 0.5 — threadwork (Многозадачность)
+## 0.5.1 — Desktop Update — текущий release
 
-- [ ] `task_t`/TCB, переключение контекста (context switch для x86_64
-      — сохранение регистров, RSP, CR3 после появления paging)
-- [ ] Планировщик — сейчас всё однопоточное и синхронное
-      (шелл живёт прямо в обработчике IRQ1, см. предупреждение в
-      шапке `shell/shell.c`)
-- [ ] Разорвать связь "клавиатура → напрямую shell_input_char()" —
-      после появления многозадачности это должно идти через очередь
-      событий, а не звонить в шелл прямо из контекста прерывания
+- [x] Graphical desktop
+- [x] Files / Terminal / Settings
+- [x] Nexus Menu / Desktop Search
+- [x] Keyboard + mouse GUI interaction
+- [x] Parallel build frontend
 
-## Milestone 0.6 — descent (User Mode)
+## 0.5.2 preparation — architecture stabilization
 
-- [ ] TSS, переход в ring 3
-- [ ] Системные вызовы (syscall/sysret — уже в long mode, естественный
-      выбор вместо int 0x80)
-- [ ] Вынести шелл + 50 команд из kernel-context в user-space процесс —
-      технически это единственная реализация шелла, которая есть,
-      просто она сейчас работает "неправильно" (в кольце 0); не
-      писать заново, перенести
-- [ ] Минимальный libc для user-space
+This is a development target, not a release-version change in the current
+archive.
 
-## Storage/FS — уже частично готово, но не оформлено как отдельный
-## milestone, потому что пришло "бесплатно" вместе с пивотом
+- [x] GUI lifecycle/state separated from rendering
+- [x] GUI desktop, search and applications separated into modules
+- [x] GUI input separated from rendering
+- [x] FAT32 implementation grouped under `fs/fat32/`
+- [x] Shell command dispatch moved to a command registry
+- [x] Documentation synchronized with the actual source tree
+- [x] Build system continues to discover modules automatically
 
-- [x] PCI enumeration, AHCI (SATA)
-- [x] FAT32: монтирование, чтение (`fs/fat32.c`)
-- [ ] Запись в FAT32 — проверить, реализована ли, или только чтение
-- [ ] VFS слой (`shell/apps/vfs.c` существует — проверить,
-      насколько это настоящая абстракция или просто обёртка над FAT32)
+## Next functional milestone — threadwork
 
-## Дальше (после descent)
+- [ ] `task_t` / TCB
+- [ ] x86_64 context switching
+- [ ] Scheduler
+- [ ] Move keyboard input from direct IRQ→shell execution to an event queue
+- [ ] Make long-running work independent of IRQ context
 
-- Сеть, SMP, журналируемая ФС — как и раньше, не расписано подробно
+## User mode
 
-## Как решаем, что "готово" на 1.0
+- [ ] TSS and ring 3 transition
+- [ ] syscall/sysret interface
+- [ ] Process object and address-space ownership
+- [ ] Move shell and commands into a user-space process without rewriting
+      their user-visible command behavior
+- [ ] Minimal user-space libc
 
-Не по чекбоксам — отдельным ADR, когда реально самодостаточна:
-грузится, многозадачность, ФС, user-space процессы, интерактивный
-шелл (уже есть, но должен переехать в user-space).
+## Storage / filesystem
 
-## Graphical shell + user mode foundation
-- Graphical framebuffer desktop with centered Nexus OS identity and black theme.
-- Application surface: Files / Terminal / Settings cards; window manager and mouse are next.
-- Ring-3 foundation: user code/data selectors and 64-bit TSS with rsp0.
-- Next: 4 KiB user pages with U/S permission, syscall entry, process object, scheduler, ELF user loader.
+- [x] PCI enumeration
+- [x] AHCI/SATA detection
+- [x] FAT32 mounting and reading
+- [ ] FAT32 write support, if/when required
+- [ ] Additional filesystem backend(s)
+- [ ] Expand VFS backend abstraction beyond the current scope
+
+## GUI / desktop
+
+- [x] Modular GUI state/core
+- [x] Renderer boundary and bitmap-font abstraction
+- [x] Desktop / dock / search modules
+- [x] Files / Terminal / Settings application modules
+- [ ] Window object and focus model
+- [ ] Window manager
+- [ ] Optional compositor, only when actually required
+- [ ] Bitmap conversion pipeline for future Inter font assets
+
+## Later
+
+- Networking
+- SMP
+- Journaling filesystem
+- Power-management improvements
+
+## 1.0 criteria
+
+Not just a checklist: NexusOS should have a self-contained boot path,
+multiprocessing or multitasking, stable filesystem facilities, isolated
+user-space processes, and an interactive shell running outside kernel context.

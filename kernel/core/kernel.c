@@ -1,8 +1,8 @@
 /* NexusOS kernel — kmain.
  *
- * На входе: boot services уже мертвы, framebuffer доступен напрямую,
- * paging — тот, что оставила прошивка (identity-map). Своя MMU-настройка —
- * следующий милстоун. */
+ * На входе: boot services уже мертвы, framebuffer доступен напрямую.
+ * Собственные page tables устанавливаются ранним этапом и заменяют
+ * зависимость от таблиц, оставленных UEFI. */
 #include <stdint.h>
 #include "boot_info.h"
 #include "console.h"

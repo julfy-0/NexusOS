@@ -1,5 +1,15 @@
 # CHANGELOG.md
 
+## 0.5.1 — post-release architecture preparation
+
+- Preserved the existing NexusOS 0.5.1 release version; no version bump.
+- Split the existing GUI implementation into core/state, renderer, desktop, input, search and application modules while keeping the public `gui_*` API.
+- Moved FAT32 sources into `fs/fat32/`.
+- Added `shell/core/command_registry.c/h` and moved command routing out of the shell input editor without removing existing commands.
+- Synchronized the architecture/build/status/roadmap/handoff documentation with the actual source tree.
+- Added ADR 0004 documenting the new GUI and shell module boundaries.
+- Verified the reorganized project with the existing Makefile/UEFI build workflow.
+
 ## [0.5.1] — Desktop Update
 
 ### Architecture maintenance

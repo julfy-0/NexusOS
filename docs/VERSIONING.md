@@ -1,8 +1,7 @@
 # VERSIONING.md — как мы version-им NexusOS
 
-Обычный SemVer (MAJOR.MINOR.PATCH для API) плохо подходит: у ядра ОС
-нет "публичного API", которое ломается между версиями в привычном
-смысле. Зато есть чёткая последовательность milestone'ов. Версия
+Обычный SemVer здесь используется как ориентир для release-совместимости,
+но фактическое развитие NexusOS привязано к milestone-ам и ADR. Версия
 привязана к ROADMAP.md, а не к произвольным изменениям.
 
 ## Формат
@@ -60,9 +59,11 @@ milestone, а архитектурный пивот (BIOS/i386 → UEFI/x86_64, 
 | Версия | Codename | Что это                                    |
 |--------|----------|----------------------------------------------|
 | 0.1    | genesis  | BIOS/i386/GRUB Multiboot — **архивная ветка**, заменена пивотом (docs/adr/0002) |
-| 0.3    | refit    | UEFI/x86_64 пивот (текущий) — импорт готового UEFI-загрузчика + long-mode ядра + shell/apps/fs/storage |
+| 0.3    | refit    | UEFI/x86_64 пивот — историческая основа текущей архитектуры |
 | 0.4    | memoria  | Своя виртуальная память, paging, heap        |
-| 0.5    | Enstein  | VFS path traversal + mount-backed FAT32     |
-| 0.5    | threadwork | Многозадачность, планировщик               |
-| 0.6    | descent  | Syscalls, переход в ring 3, шелл в userspace  |
-| 0.7+   | (придумаем ближе к делу) | —                        |
+| 0.5    | Enstein  | VFS path traversal + mount-backed FAT32       |
+| 0.5.1  | Desktop Update | Graphical desktop and GUI integration    |
+| 0.5.2  | (future) | Architecture stabilization / maintenance     |
+| 0.6    | threadwork | Многозадачность, планировщик                 |
+| 0.7    | descent  | Syscalls, переход в ring 3, шелл в userspace  |
+| 0.8+   | (придумаем ближе к делу) | —                        |

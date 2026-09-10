@@ -1,117 +1,169 @@
 # ARCHITECTURE.md
 
-## Тип ядра
+## Type of kernel
 
-Монолитное (`docs/adr/0001`). Архитектура — UEFI/x86_64
-(`docs/adr/0002`, заменяет прежнюю BIOS/i386/GRUB).
+NexusOS is a **monolithic kernel** (`docs/adr/0001`). The project was moved
+to UEFI/x86_64 by `docs/adr/0002`; the current work does not change either
+decision.
 
-## Организация дерева исходников
+The source tree is modular, but source directories are not separate kernel
+processes. All linked kernel-side modules still execute in ring 0.
+
+## Source-tree boundaries
 
 ```text
-boot/uefi/        UEFI loader
-kernel/core/      kernel orchestration, state, panic, usermode foundation
-kernel/arch/      x86_64 entry/GDT/IDT/ISR/linker
-kernel/mm/        paging
- drivers/         hardware/input/storage/graphics/timer/USB
-fs/vfs/           VFS core, mounts, filesystem registry
-fs/fat32/         FAT32 implementation
-gui/              GUI core + renderer/font boundary
-shell/            shell core + categorized commands
-lib/memory/       freestanding memory primitives
-assets/           wallpapers and fonts
-include/nexus/    shared headers
-platform/target/  hardware detection
+boot/uefi/          UEFI loader
+kernel/core/        kernel orchestration, state, panic, usermode foundation
+kernel/arch/x86_64/ x86_64 entry/GDT/IDT/ISR/linker
+kernel/mm/          paging
+
+drivers/            hardware/input/storage/graphics/timer/USB
+fs/vfs/             VFS core, mounts, filesystem registry
+fs/fat32/           FAT32 implementation
+
+gui/core/           GUI lifecycle and shared state
+gui/desktop/        desktop/dock/menu surface
+gui/apps/           Files, Terminal, Settings
+ gui/input/         GUI keyboard/mouse event handling
+gui/renderer/       framebuffer primitives, text and font boundary
+gui/search/         desktop search
+
+shell/core/         shell line editor + command registry
+shell/commands/     command implementations grouped by function
+lib/                freestanding reusable code
+assets/             static, replaceable assets
+include/nexus/      shared public headers
+platform/target/    runtime hardware inventory
 ```
 
-The directory boundaries are organizational boundaries only. The current
-kernel remains monolithic and all linked kernel-side C modules execute in
-kernel context.
+The GUI and shell boundaries are deliberately above their hardware and
+storage dependencies: PS/2 and framebuffer drivers do not contain GUI policy,
+and individual shell commands do not implement command-line parsing or
+registration.
 
-## Поток загрузки
+## Boot flow
 
-```
+```text
 UEFI Firmware
-  → boot/uefi/boot.c: efi_main(ImageHandle, SystemTable)
-      1. GOP (Graphics Output Protocol) — получаем framebuffer
-      2. открываем том, с которого загрузились, читаем \kernel.elf
-      3. парсим ELF64 (boot/uefi/elf.h), раскладываем PT_LOAD-сегменты
-         по их физическим адресам (AllocatePages(AllocateAddress, ...))
-      4. финальный GetMemoryMap(), ExitBootServices()
-      5. прыгаем на entry point ядра с nexus_boot_info_t* в RDI
-         (System V ABI — обычное соглашение GCC, а не MS x64 ABI,
-         которым живёт сам бутлоадер, — граница ABI ровно на этом прыжке)
+  → boot/uefi/src/boot.c: efi_main(ImageHandle, SystemTable)
+      1. GOP framebuffer
+      2. read kernel.elf from the boot volume
+      3. parse ELF64 and place PT_LOAD segments
+      4. final GetMemoryMap() + ExitBootServices()
+      5. jump to kernel entry with nexus_boot_info_t* in RDI
   → kernel/arch/x86_64/entry.S: _start
-      свой стек (64 KiB), call kmain (rdi уже на месте)
-  → kernel/core/kernel.c: kmain(nexus_boot_info_t *boot_info)
-      console_init() → gdt_init() → idt_init() → pic_remap() →
-      pit_init(100) → keyboard_init() → размаскировать IRQ0/IRQ1 →
-      ahci_init()+fat32_mount() (если диск есть) → shell_init() → sti
+      own stack → kmain(rdi)
+  → kernel/core/kernel.c: kmain()
+      console → GDT → IDT → paging → PIC/PIT → PS/2 input
+      → PCI/AHCI/FAT32 → xHCI → platform detection → shell
 ```
 
-Два разных ABI в одном проекте — это не случайность, а следствие
-того, что UEFI исторически MS-совместимая среда (PE32+, MS x64 ABI:
-red zone запрещён по другой причине, calling convention другой), а
-ядро — обычный SysV ABI, как весь остальной Linux-мир. Граница между
-ними ровно в месте прыжка `kernel_entry(&boot_info)` в конце
-`boot/uefi/boot.c` — после этого момента бутлоадер больше не
-исполняется, ABI-конфликта в runtime нет.
+The UEFI loader and kernel use different ABIs. The loader is compiled for
+the UEFI/MS x64 environment; the kernel uses the System V x86_64 ABI. The
+ABI boundary is the handoff into the kernel entry point and is not changed by
+the directory reorganization.
 
-## Прерывания
+## Interrupts
 
-IDT на 48 векторов: 0-31 исключения CPU, 32-47 — IRQ0-15 после PIC
-remap (`drivers/hardware/pic/pic.c`). Общий ассемблерный стаб
-(`kernel/arch/x86_64/isr.S`) сохраняет регистры в `interrupt_frame_t`
-(layout зафиксирован в `kernel/arch/x86_64/idt.h` — при изменении стаба
-менять оба места синхронно) и зовёт единый C-обработчик
-`isr_handler()` (`kernel/arch/x86_64/idt.c`), который либо паникует
-(vector < 32), либо диспетчеризует по номеру (32 = таймер,
-33 = клавиатура), либо просто шлёт EOI.
+The IDT contains vectors 0–31 for CPU exceptions and 32–47 for PIC IRQs.
+`kernel/arch/x86_64/isr.S` preserves the interrupt frame and calls
+`isr_handler()` in `kernel/arch/x86_64/idt.c`.
 
-Это отличается от типичного паттерна "таблица callback'ов,
-регистрируемая динамически" (как было в прежней BIOS-версии) — здесь
-диспетчеризация зашита прямо в `isr_handler()` через `if`. Для
-текущего набора устройств (2 IRQ) это осознанно проще; если устройств
-станет больше — рассмотреть переход на таблицу, но это не сделано
-заранее ("не оптимизируй то, что не болит").
+Current hardware dispatch remains intentionally simple: IRQ0 drives the PIT,
+IRQ1 the keyboard and IRQ12 the PS/2 mouse. The PS/2 drivers remain hardware
+modules; GUI policy is handled later by `gui/input/`.
 
-## Память
+## Memory
 
-**Свои page tables** (`kernel/mm/paging.c`, `docs/adr/0003`) — с Milestone 0.4
-ядро больше не полагается на таблицы, оставленные UEFI firmware.
-Схема пока та же по смыслу — identity map (виртуальный адрес ==
-физический), 2 MiB страницы (PS-бит в PD, без PT). Покрытие строится
-в три слоя: безусловно первые 4 GiB, затем каждый регион из настоящей
-EFI memory map (включая MMIO/reserved), затем framebuffer явно (он не
-гарантированно попадает в memory map тем же адресом). `paging_init()`
-вызывается из `kmain()` сразу после `idt_init()` — так page fault во
-время самой настройки паджинга хотя бы красиво диагностируется
-(vector 14, CR2 + расшифровка error code в `kernel/arch/x86_64/idt.c`), а не
-уходит в тройной fault.
+`kernel/mm/paging.c` owns the current page-table implementation. It builds
+PML4/PDPT/PD tables using 2 MiB pages, maps the required identity regions,
+and switches CR3. Page faults are diagnosed by the IDT exception path.
 
-`nexus_boot_info_t` несёт полную EFI memory map (`kstate_mem_summary()`
-умеет её просуммировать; шелл-команда `meminfo` показывает и paging-,
-и memory-map-статус), но из этого пока не построен настоящий allocator
-— `kmalloc`/`kfree` это следующий шаг Milestone "memoria"
-(`docs/ROADMAP.md`). Higher-half kernel и разделение прав страниц
-(`.text` read+exec, `.rodata` read-only — сейчас всё read+write) тоже
-ещё не сделаны, см. `docs/adr/0003` "Последствия".
+The current architecture intentionally does **not** introduce a heap or
+higher-half kernel as part of this restructuring. Those remain future memory
+milestones.
 
-## Драйверы и связи между модулями
+## GUI architecture
 
-`drivers/input/keyboard/keyboard.c` напрямую зовёт `shell_input_char()` —
-то есть драйвер клавиатуры знает о существовании шелла. Это отличается
-от принципа "драйвер ничего не знает о том, кто его использует" из
-`docs/adr/0001` — но так было в исходном перенесённом проекте, и
-переписывать это заодно с переносом было бы смешиванием двух разных
-задач в одном шаге. Разрыв этой связи (через очередь событий) — явный
-пункт в `docs/ROADMAP.md` (Milestone "threadwork"), не забыт, просто
-отложен.
+The GUI was previously concentrated in one `gui/core/gui.c`. It is now split
+without changing the external `gui_*` API:
 
-## Шелл и команды
+```text
+PS/2 keyboard ─┐
+               ├→ gui/input/ ─────┐
+PS/2 mouse ─────┘                  │
+                                   ↓
+                             gui/core/gui.c
+                                   │
+                 ┌─────────────────┼──────────────────┐
+                 ↓                 ↓                  ↓
+             desktop/           search/           apps/
+                 │                                   ├→ files/
+                 └───────────────┬───────────────────┼→ terminal/
+                                 ↓                   └→ settings/
+                           renderer/
+```
 
-`shell/shell.c` + `shell/apps/*.c` — почти 50 команд,
-каждая как отдельная пара `.c`/`.h`. Все они выполняются **в контексте
-прерывания клавиатуры**, синхронно, в кольце 0 — не как процессы.
-Команда должна быть быстрой и не блокирующей (см. комментарий в шапке
-`shell.c`). Это временно: Milestone "descent" должен вынести шелл в
-user-space процесс без переписывания логики команд с нуля.
+`gui/core/gui_state.*` owns the single GUI context. It prevents each GUI
+module from maintaining its own copy of framebuffer/view state.
+`gui/renderer/` owns drawing primitives and the current bitmap-font boundary.
+Application modules own application-specific rendering and actions.
+
+This is preparation for a future window system, not a compositor rewrite.
+
+### Window-system preparation
+
+A future window manager can be added behind the existing GUI lifecycle. The
+current split provides natural places for window state, focus and hit testing
+without forcing a new compositor or changing working applications now.
+
+## Shell architecture
+
+The command implementations remain in:
+
+```text
+shell/commands/system/
+shell/commands/filesystem/
+shell/commands/utilities/
+```
+
+`shell/core/shell.c` owns the input line, history and argument splitting.
+`shell/core/command_registry.c` owns command registration, dispatch, help
+metadata and the small set of shell-integrated commands (`mount`,
+`desktop-run`, `clear`, etc.).
+
+This removes command routing from the shell input editor while preserving all
+existing command names and implementations.
+
+## Filesystem architecture
+
+```text
+shell commands / GUI Files
+          ↓
+       fs/vfs/core
+          ↓
+    fs/vfs/mount + registry
+          ↓
+      concrete FS
+          ↓
+       fs/fat32
+          ↓
+       drivers/storage
+```
+
+The RAM-backed VFS remains independent of the concrete FAT32 implementation.
+The FAT32 source is kept under `fs/fat32/` so the filesystem boundary is
+visible in the source tree.
+
+## Include/dependency policy
+
+- Shared interfaces belong in `include/nexus/` when they cross major
+  subsystems (for example `boot_info.h`).
+- Module-private headers stay beside their module.
+- Source files should include the nearest module header rather than reaching
+  through long relative paths.
+- GUI application code may depend on the GUI renderer/state and VFS APIs, but
+  the framebuffer driver must not depend on individual GUI applications.
+- Shell command implementations may depend on kernel services, but shell
+  input parsing/registration belongs in `shell/core/`.
+- Keep the kernel freestanding: no libc requirement and no C++.
