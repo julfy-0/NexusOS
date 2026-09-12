@@ -30,7 +30,7 @@ LDFLAGS_EFI := -m i386pep -nostdlib -shared -Bsymbolic -e efi_main --subsystem 1
 # Kernel: freestanding ELF64, System V ABI.
 CFLAGS_KERNEL := -ffreestanding -fno-stack-protector -fno-stack-check \
                  -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mgeneral-regs-only \
-                 -fno-pic -fno-pie -fno-ident \
+                 -fno-pic -fno-pie -mcmodel=kernel -fno-ident \
                  -Wall -Wextra -O2 $(INCLUDES)
 CFLAGS_ASM := -ffreestanding -fno-ident -mno-red-zone
 LDFLAGS_KERNEL := -nostdlib -static -T kernel/arch/x86_64/linker.ld

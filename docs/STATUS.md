@@ -72,6 +72,7 @@
       из любого места ядра
 - [x] Свои page tables (`kernel/mm/paging.c`) — 4-уровневая схема PML4/PDPT/PD,
       2 MiB страницы, реально переключает CR3 (не identity-map от UEFI)
+- [x] Higher-half execution — low bootstrap trampoline + high kernel alias
 - [x] Page fault handler (vector 14) — расшифровка CR2/error code
       (present/write/user/reserved/instruction-fetch)
 - [x] Scrollback в консоли (PgUp/PgDn) — кольцевой буфер истории строк
@@ -82,8 +83,8 @@
 
 ## Что НЕ сделано
 
-- [ ] `kmalloc`/`kfree` (heap ядра) — следующая задача, см. ниже
-- [ ] Higher-half kernel (переезд с 0x200000)
+- [x] `kmalloc`/`kfree` — kernel heap на PMM/VMM, 16-byte alignment
+- [x] Higher-half kernel — kernel VMA `0xFFFFFFFF80000000`, physical load base `0x00200000`
 - [ ] Многозадачность — всё выполняется синхронно в контексте
       прерывания клавиатуры
 - [ ] User mode (ring 3), системные вызовы — шелл и команды это
@@ -108,14 +109,9 @@
 
 ## Следующая задача
 
-Milestone 0.4 "memoria" (`docs/ROADMAP.md`), первые два пункта уже
-закрыты (page tables, page fault handler). Осталось:
-
-1. `kmalloc`/`kfree` — heap ядра на основе page allocator +
-   физической memory map (уже приходит от UEFI через
-   `nexus_boot_info_t.mmap`, см. `kstate_mem_summary()`)
-2. Higher-half kernel (переезд с 0x200000) — не критично сразу, но
-   нужно перед user/kernel split (Milestone 0.6)
+**0.5.3 — Interrupts & scheduling:** event queue, timer-driven scheduler,
+TCB/context switching, moving shell execution out of IRQ context, and basic
+synchronization primitives.
 
 ## Правила для продолжающего
 

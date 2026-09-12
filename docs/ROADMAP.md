@@ -32,7 +32,13 @@ This is the active development roadmap. The current release remains **0.5.1**;
   - [x] Access/protection/privilege diagnostics
   - [x] RIP/CS/RFLAGS/CR3 reporting
   - [x] Safe non-recursive diagnostic path
-- [ ] 0.5.2.5 — Higher-half kernel
+- [x] 0.5.2.5 — Higher-half kernel
+  - [x] Separate physical load address and higher-half virtual address
+  - [x] Low physical bootstrap trampoline
+  - [x] Temporary identity + higher-half bootstrap mappings
+  - [x] Higher-half kernel execution entry
+  - [x] Final page tables retain higher-half kernel mapping
+  - [x] PMM reserves physical kernel range correctly
 
 ### 0.5.3 — Interrupts & scheduling
 
@@ -134,24 +140,10 @@ complete. At that point the block receives a GitHub Release description.
 - [x] Перенос всего кода в новую структуру, реальная сборка проверена
 - [x] **Живой бут в QEMU+OVMF подтверждён** — шелл и команды проверены
 
-## Milestone 0.4 — memoria (Virtual Memory)
+## Historical milestone notes
 
-## Milestone 0.5 — Enstein (VFS path traversal) — текущий
-
-Сейчас работает identity-map, оставленный UEFI firmware — это не
-"настоящая" виртуальная память, а просто то, что было до нас.
-
-- [ ] Свои page tables (4-уровневая схема x86_64: PML4/PDPT/PD/PT)
-- [ ] Higher-half kernel (переезд с 0x200000 на что-то вроде
-      0xFFFFFFFF80000000) — сейчас не критично, но нужно перед
-      настоящим user/kernel split
-- [ ] Page fault handler (vector 14) с осмысленной диагностикой —
-      сейчас все исключения 0-31 просто ведут в panic_screen()
-- [ ] `kmalloc`/`kfree` — heap ядра на основе page allocator +
-      реальной физической memory map (она уже приходит от UEFI
-      через `nexus_boot_info_t.mmap`, см. `kstate_mem_summary()`
-      в `kernel/core/kstate.c` — уже читает её, просто не строит из этого
-      allocator)
+The older milestone labels below are retained for history; the active
+implementation status is tracked in the `0.5.2 → 0.6.0 master plan` above.
 
 ## Milestone 0.5 — threadwork (Многозадачность)
 

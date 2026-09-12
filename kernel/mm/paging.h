@@ -37,6 +37,11 @@ uint64_t paging_get_cr3(void);
  * что реально было в EFI memory map выше этого порога). Для диагностики. */
 uint64_t paging_base_identity_gib(void);
 
+/* Higher-half kernel layout (VMA != physical load address). */
+uint64_t paging_kernel_virtual_base(void);
+uint64_t paging_kernel_physical_base(void);
+int paging_higher_half_ready(void);
+
 /* Домапливает диапазон [start, end) уже ПОСЛЕ paging_init() и переключения
  * CR3 — для MMIO BAR'ов (например xHCI), которые лежат выше базового
  * идентити-диапазона и которых не было в EFI memory map/framebuffer на

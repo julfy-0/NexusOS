@@ -1,3 +1,19 @@
+## 0.5.2.5 — Higher-half Kernel
+
+- Separated the kernel physical load address (`0x00200000`) from its linked
+  higher-half virtual address (`0xFFFFFFFF80000000`).
+- Added a low physical x86_64 bootstrap trampoline in `kernel/arch/x86_64/entry.S`.
+- Added temporary identity + higher-half bootstrap page tables before C code
+  begins executing at the higher-half address.
+- Added `kernel_high_entry` as the first normal higher-half execution point.
+- Reworked the kernel linker script to emit distinct VMA/LMA addresses and
+  physical linker symbols.
+- Updated the kernel page-table builder to install the final higher-half alias
+  while retaining the low identity map for early boot/physical/MMIO access.
+- Updated PMM kernel reservation to use physical linker symbols.
+- Enabled `-mcmodel=kernel` for higher-half C code.
+- Added startup diagnostics for kernel virtual/physical bases.
+
 ## Unreleased — 0.5.2.3 kernel heap
 
 - Added `kernel/mm/heap.c` and `kernel/mm/heap.h`.

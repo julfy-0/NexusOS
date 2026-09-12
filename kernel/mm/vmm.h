@@ -5,7 +5,9 @@
 
 /* Virtual Memory Manager — 4 KiB page mapping API.
  *
- * The current kernel remains identity-mapped. VMM adds a safe API for
+ * The kernel now executes from its higher-half virtual alias while the
+ * low identity map is intentionally retained for early physical/MMIO access.
+ * VMM adds a safe API for
  * creating/removing individual 4 KiB mappings and translating virtual
  * addresses. Page-table pages are obtained from the PMM.
  */

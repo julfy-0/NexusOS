@@ -56,9 +56,15 @@ void kmain(nexus_boot_info_t *boot_info) {
     idt_init();
     console_status_ok();
 
-    console_print("Setting up paging (own PML4/PDPT/PD, identity map)");
+    console_print("Setting up paging (own PML4 + higher-half kernel)");
     paging_init(boot_info);
     console_status_ok();
+    console_print("  -> kernel VMA: 0x");
+    console_print_hex(paging_kernel_virtual_base());
+    console_print(" | physical base: 0x");
+    console_print_hex(paging_kernel_physical_base());
+    console_print(" | higher-half: ");
+    console_print(paging_higher_half_ready() ? "READY\n" : "FAILED\n");
 
     console_print("Initializing physical memory manager (PMM)");
     pmm_init(boot_info);

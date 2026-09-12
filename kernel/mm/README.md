@@ -1,7 +1,7 @@
 # NexusOS Memory Management
 
 The memory subsystem is built incrementally around the current UEFI boot
-contract and identity-mapped x86_64 kernel.
+contract and higher-half x86_64 kernel with a temporary low identity map retained for early boot.
 
 ## PMM
 
@@ -18,9 +18,13 @@ boot information, memory map, framebuffer and low memory remain reserved.
 - query mappings
 - invalidate the affected TLB entry
 
-The boot identity map still uses 2 MiB pages. New page-table pages are
-currently required to live below 4 GiB because the kernel has no permanent
-physical-memory direct map yet.
+The boot identity map still uses 2 MiB pages. The kernel is linked at
+`0xFFFFFFFF80000000` but is physically loaded beginning at `0x00200000`. A
+small assembly trampoline creates a temporary identity + higher-half alias,
+then transfers execution to the high virtual address. The kernel subsequently
+builds its own PML4 and keeps the low identity map during this stage. New
+page-table pages are still required to live below 4 GiB because there is no
+permanent physical-memory direct map yet.
 
 ## Kernel heap
 
@@ -51,3 +55,24 @@ The handler intentionally does **not** walk the VMM page tables or attempt
 recovery. A damaged page-table hierarchy could make a diagnostic page-table
 walk recursively fault. Actual demand paging and process-level recovery are
 future milestones.
+
+
+## Higher-half kernel (0.5.2.5)
+
+The linker separates the kernel virtual address (VMA) from its physical load
+address (LMA):
+
+- physical load base: `0x00200000`
+- kernel virtual base: `0xFFFFFFFF80000000`
+- `_start`: low-physical bootstrap entry
+- `kernel_high_entry`: higher-half execution entry
+
+`kernel/arch/x86_64/entry.S` builds bootstrap page tables before the C kernel
+can run at its linked address. The bootstrap maps the first 4 GiB identity and
+aliases that range at the higher-half kernel window. `paging_init()` then
+rebuilds the final page tables and installs the permanent higher-half kernel
+alias while retaining the low identity mapping for boot information, MMIO and
+physical page-table access.
+
+The PMM now reserves the physical kernel image using physical linker symbols,
+not the higher-half virtual addresses.

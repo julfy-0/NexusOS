@@ -22,8 +22,8 @@ static uint64_t g_free_pages;
 static uint64_t g_max_physical_address;
 static int g_ready;
 
-extern char __kernel_start;
-extern char __kernel_end;
+extern char __kernel_phys_start;
+extern char __kernel_phys_end;
 
 static void bitmap_set(uint64_t page) {
     g_bitmap[page >> 3] |= (uint8_t)(1U << (page & 7));
@@ -141,8 +141,8 @@ void pmm_init(const void *boot_info_ptr) {
 
     /* The linker symbols cover .text/.rodata/.data/.bss, including this PMM
      * bitmap and the page tables. */
-    reserve_range((uint64_t)(uintptr_t)&__kernel_start,
-                  (uint64_t)(uintptr_t)&__kernel_end);
+    reserve_range((uint64_t)(uintptr_t)&__kernel_phys_start,
+                  (uint64_t)(uintptr_t)&__kernel_phys_end);
 
     /* Boot info itself is a firmware-owned static object. The memory map was
      * allocated from EfiLoaderData, so neither may be recycled by PMM. */
