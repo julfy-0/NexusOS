@@ -29,32 +29,41 @@ kernel context.
 
 ## Поток загрузки
 
-```
+```text
 UEFI Firmware
   → boot/uefi/boot.c: efi_main(ImageHandle, SystemTable)
-      1. GOP (Graphics Output Protocol) — получаем framebuffer
-      2. открываем том, с которого загрузились, читаем \kernel.elf
-      3. парсим ELF64 (boot/uefi/elf.h), раскладываем PT_LOAD-сегменты
-         по их физическим адресам (AllocatePages(AllocateAddress, ...))
-      4. финальный GetMemoryMap(), ExitBootServices()
-      5. прыгаем на entry point ядра с nexus_boot_info_t* в RDI
-         (System V ABI — обычное соглашение GCC, а не MS x64 ABI,
-         которым живёт сам бутлоадер, — граница ABI ровно на этом прыжке)
-  → kernel/arch/x86_64/entry.S: _start
-      свой стек (64 KiB), call kmain (rdi уже на месте)
-  → kernel/core/kernel.c: kmain(nexus_boot_info_t *boot_info)
-      console_init() → gdt_init() → idt_init() → pic_remap() →
-      pit_init(100) → keyboard_init() → размаскировать IRQ0/IRQ1 →
-      ahci_init()+fat32_mount() (если диск есть) → shell_init() → sti
+      1. GOP → framebuffer
+      2. открывается `\kernel.elf` на загрузочном томе
+      3. ELF64 валидируется
+      4. все PT_LOAD сегменты получают единый физический image allocation
+         ниже 4 GiB
+      5. ET_DYN `R_X86_64_RELATIVE` relocations применяются на месте
+      6. boot_info + финальная EFI memory map фиксируются ниже 4 GiB
+      7. ExitBootServices()
+      8. переход на runtime-relocated kernel entry с `RDI = boot_info`
+  → kernel/arch/x86_64/entry.S: `_start`
+      собственный 64 KiB stack → `kmain(boot_info)`
+  → kernel/core/kernel.c
+      contract validation → GDT → IDT → own paging → PMM → VMM → heap →
+      PIC/PIT/input/storage/USB/GPU → shell/usermode/GUI → STI
 ```
 
-Два разных ABI в одном проекте — это не случайность, а следствие
-того, что UEFI исторически MS-совместимая среда (PE32+, MS x64 ABI:
-red zone запрещён по другой причине, calling convention другой), а
-ядро — обычный SysV ABI, как весь остальной Linux-мир. Граница между
-ними ровно в месте прыжка `kernel_entry(&boot_info)` в конце
-`boot/uefi/boot.c` — после этого момента бутлоадер больше не
-исполняется, ABI-конфликта в runtime нет.
+### Boot contract
+
+`nexus_boot_info_t` теперь содержит не только framebuffer и EFI memory map,
+но и фактический runtime physical range ядра: `kernel_phys_base`,
+`kernel_phys_end`, `kernel_image_size`, `kernel_link_base` и `kernel_entry`.
+Это принципиально важно: после relocatable загрузки linker address больше
+не равен physical address.
+
+### Kernel image model
+
+NexusOS остаётся freestanding x86_64 kernel, но ELF теперь собирается как
+`ET_DYN` с `-fPIE`. Текущая loader contract допускает только relocations
+`R_X86_64_RELATIVE`; `readelf -r` для текущего kernel image показывает
+только этот тип relocation. Никакой userspace dynamic linker после hand-off
+не нужен.
+
 
 ## Прерывания
 
@@ -76,25 +85,16 @@ remap (`drivers/hardware/pic/pic.c`). Общий ассемблерный ста
 
 ## Память
 
-**Свои page tables** (`kernel/mm/paging.c`, `docs/adr/0003`) — с Milestone 0.4
-ядро больше не полагается на таблицы, оставленные UEFI firmware.
-Схема пока та же по смыслу — identity map (виртуальный адрес ==
-физический), 2 MiB страницы (PS-бит в PD, без PT). Покрытие строится
-в три слоя: безусловно первые 4 GiB, затем каждый регион из настоящей
-EFI memory map (включая MMIO/reserved), затем framebuffer явно (он не
-гарантированно попадает в memory map тем же адресом). `paging_init()`
-вызывается из `kmain()` сразу после `idt_init()` — так page fault во
-время самой настройки паджинга хотя бы красиво диагностируется
-(vector 14, CR2 + расшифровка error code в `kernel/arch/x86_64/idt.c`), а не
-уходит в тройной fault.
+Свои page tables (`kernel/mm/paging.c`) сохраняют identity mapping первых
+4 GiB с 2 MiB страницами. Это сознательно оставлено простым после rewrite:
+relocatable kernel может находиться в любом физическом месте внутри этого
+диапазона, а PMM резервирует именно runtime image range из boot contract.
+VMM продолжает добавлять 4 KiB mappings для heap и других виртуальных регионов.
 
-`nexus_boot_info_t` несёт полную EFI memory map (`kstate_mem_summary()`
-умеет её просуммировать; шелл-команда `meminfo` показывает и paging-,
-и memory-map-статус), но из этого пока не построен настоящий allocator
-— `kmalloc`/`kfree` это следующий шаг Milestone "memoria"
-(`docs/ROADMAP.md`). Higher-half kernel и разделение прав страниц
-(`.text` read+exec, `.rodata` read-only — сейчас всё read+write) тоже
-ещё не сделаны, см. `docs/adr/0003` "Последствия".
+Текущая архитектура ещё не является higher-half kernel. Адрес `0x200000` —
+link-time base ELF image, а не обязательный physical load address. Настоящий
+higher-half переход остаётся отдельной задачей roadmap.
+
 
 ## Драйверы и связи между модулями
 

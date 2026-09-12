@@ -9,8 +9,8 @@ descent — импортированный проект принёс "archive" (
 
 ## NexusOS 0.5.2 → 0.6.0 master plan
 
-This is the active development roadmap. The current release remains **0.5.1**;
-0.5.2 is the next development milestone.
+This is the active development roadmap. The current rollback baseline is **0.5.3**;
+0.5.3.6 is the active process-safe event integration milestone.
 
 ### 0.5.2 — Memory & execution foundation
 
@@ -26,28 +26,40 @@ This is the active development roadmap. The current release remains **0.5.1**;
   - [x] map/unmap/virtual-to-physical translation
   - [x] TLB invalidation after mapping changes
 - [x] 0.5.2.3 — Kernel heap (`kmalloc`/`kfree`)
-- [x] 0.5.2.4 — Page-fault diagnostics
-  - [x] Dedicated #PF handler
-  - [x] CR2 and error-code decoding
-  - [x] Access/protection/privilege diagnostics
-  - [x] RIP/CS/RFLAGS/CR3 reporting
-  - [x] Safe non-recursive diagnostic path
-- [x] 0.5.2.5 — Higher-half kernel
-  - [x] Separate physical load address and higher-half virtual address
-  - [x] Low physical bootstrap trampoline
-  - [x] Temporary identity + higher-half bootstrap mappings
-  - [x] Higher-half kernel execution entry
-  - [x] Final page tables retain higher-half kernel mapping
-  - [x] PMM reserves physical kernel range correctly
+- [ ] 0.5.2.4 — Page-fault diagnostics
+- [ ] 0.5.2.5 — Higher-half kernel
 
 ### 0.5.3 — Interrupts & scheduling
 
-- [ ] Interrupt/event queue
-- [ ] Timer-driven scheduler
-- [ ] Threads and TCB
-- [ ] x86_64 context switching
-- [ ] Move shell execution out of IRQ context
-- [ ] Synchronization primitives
+Rollback baseline: `0.5.3`; interrupt/event queue, scheduler, synchronization and kernel event waiting are now active.
+
+- [x] 0.5.3.1 — Interrupt/event queue
+  - [x] Fixed-size 256-event ring buffer
+  - [x] IRQ capture-only handlers for PIT/PS2 keyboard/PS2 mouse
+  - [x] Deferred keyboard and mouse processing in kernel context
+  - [x] Deferred xHCI polling from timer IRQ to event loop
+  - [x] Queue overflow statistics
+  - [x] Shell/GUI execution removed from PS/2 IRQ context
+- [x] 0.5.3.2 — Timer-driven scheduler foundation
+- [x] 0.5.3.3 — Threads & TCB
+- [x] 0.5.3.4 — Scheduler ready queue and sleep/wakeup
+  - [x] Intrusive FIFO ready queue
+  - [x] Ordered sleep queue by wake tick
+  - [x] `thread_sleep_ms()`
+  - [x] `thread_wakeup()`
+  - [x] Deferred timer-driven wakeups outside IRQ context
+  - [x] Zombie stack/TCB reclamation
+  - [x] Ready/sleeping scheduler diagnostics
+- [x] Threads and TCB
+- [x] x86_64 context switching
+- [x] Move shell execution out of IRQ context
+- [x] 0.5.3.5 — Synchronization primitives
+- [x] 0.5.3.6 — Process-safe event/wait integration
+  - [x] Per-event-type sequence counters
+  - [x] Kernel thread event wait queues
+  - [x] Race-safe event wait/check boundary
+  - [x] Broadcast wakeup of event waiters
+  - [x] No scheduler mutation or context switching from IRQ handlers
 
 ### 0.5.4 — Processes & user execution
 
@@ -140,10 +152,24 @@ complete. At that point the block receives a GitHub Release description.
 - [x] Перенос всего кода в новую структуру, реальная сборка проверена
 - [x] **Живой бут в QEMU+OVMF подтверждён** — шелл и команды проверены
 
-## Historical milestone notes
+## Milestone 0.4 — memoria (Virtual Memory)
 
-The older milestone labels below are retained for history; the active
-implementation status is tracked in the `0.5.2 → 0.6.0 master plan` above.
+## Milestone 0.5 — Enstein (VFS path traversal) — текущий
+
+Сейчас работает identity-map, оставленный UEFI firmware — это не
+"настоящая" виртуальная память, а просто то, что было до нас.
+
+- [ ] Свои page tables (4-уровневая схема x86_64: PML4/PDPT/PD/PT)
+- [ ] Higher-half kernel (переезд с 0x200000 на что-то вроде
+      0xFFFFFFFF80000000) — сейчас не критично, но нужно перед
+      настоящим user/kernel split
+- [ ] Page fault handler (vector 14) с осмысленной диагностикой —
+      сейчас все исключения 0-31 просто ведут в panic_screen()
+- [ ] `kmalloc`/`kfree` — heap ядра на основе page allocator +
+      реальной физической memory map (она уже приходит от UEFI
+      через `nexus_boot_info_t.mmap`, см. `kstate_mem_summary()`
+      в `kernel/core/kstate.c` — уже читает её, просто не строит из этого
+      allocator)
 
 ## Milestone 0.5 — threadwork (Многозадачность)
 

@@ -11,6 +11,7 @@
  */
 #include "mouse.h"
 #include "io.h"
+#include "event_queue.h"
 
 #define PS2_DATA       0x60
 #define PS2_STATUS     0x64
@@ -38,7 +39,7 @@ static uint8_t g_packet_index;
 static uint8_t g_packet_len = 3;
 static uint8_t g_device_id = MOUSE_ID_STD;
 
-static int mouse_process_byte(uint8_t b);
+int mouse_process_byte(uint8_t b);
 
 static void wait_write(void) {
     for (uint32_t i = 0; i < 100000; ++i) {
@@ -179,7 +180,7 @@ void mouse_set_screen_size(uint32_t width, uint32_t height) {
     g_y = clamp_coord(g_y, g_h);
 }
 
-static int mouse_process_byte(uint8_t b) {
+int mouse_process_byte(uint8_t b) {
     /* First byte always has bit 3 set. This resynchronizes the stream after
      * dropped bytes or an unexpected controller response. */
     if (g_packet_index == 0) {
@@ -221,9 +222,15 @@ static int mouse_process_byte(uint8_t b) {
 }
 
 void mouse_handle_irq(void) {
-    uint8_t status = inb(PS2_STATUS);
-    if (!(status & ST_OBF) || !(status & ST_AUX)) return;
-    (void)mouse_process_byte(inb(PS2_DATA));
+    /* IRQ context only captures raw auxiliary bytes. Packet assembly and GUI
+     * state updates happen in kernel_events_process(). */
+    for (int i = 0; i < 16; ++i) {
+        uint8_t status = inb(PS2_STATUS);
+        if (!(status & ST_OBF) || !(status & ST_AUX)) break;
+        (void)event_queue_push(NEXUS_EVENT_MOUSE_BYTE,
+                               NEXUS_EVENT_SOURCE_MOUSE,
+                               inb(PS2_DATA));
+    }
 }
 
 int mouse_poll(void) {

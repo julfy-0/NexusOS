@@ -28,19 +28,39 @@
 #include "gpu.h"
 #include "usb.h"
 #include "mouse.h"
+#include "kernel_events.h"
+#include "event_queue.h"
+#include "scheduler.h"
 #include "target.h"
 #include "nexus_version.h"
 
-void kmain(nexus_boot_info_t *boot_info) {
-    console_init(&boot_info->fb);
+static volatile uint64_t g_scheduler_service_ticks;
 
-    if (boot_info->magic != NEXUS_BOOT_MAGIC) {
-        /* Даже без валидного boot_info попробуем хоть что-то показать —
-         * но полагаться на fb.* в этом случае небезопасно, поэтому просто
-         * останавливаемся. */
+static void scheduler_service_thread(void *arg) {
+    (void)arg;
+    for (;;) {
+        /* Demonstrate process-safe event waiting: this thread sleeps until
+         * normal kernel event processing observes a keyboard scancode. */
+        if (kernel_events_wait(NEXUS_EVENT_KEYBOARD_SCANCODE)) {
+            g_scheduler_service_ticks++;
+        }
+    }
+}
+
+void kmain(nexus_boot_info_t *boot_info) {
+    /* The loader contract is intentionally checked before dereferencing any
+     * framebuffer or memory-map field. From this point onward interrupts stay
+     * disabled until the hardware initialization is complete. */
+    __asm__ volatile ("cli" ::: "memory");
+
+    if (boot_info == 0 || boot_info->magic != NEXUS_BOOT_MAGIC ||
+        boot_info->fb.base == 0 || boot_info->fb.width == 0 ||
+        boot_info->fb.height == 0 || boot_info->kernel_phys_end <= boot_info->kernel_phys_base ||
+        boot_info->kernel_entry == 0) {
         for (;;) { __asm__ volatile ("cli; hlt"); }
     }
 
+    console_init(&boot_info->fb);
     kstate_set_boot_info(boot_info);
 
     console_set_color(COLOR_CYAN, COLOR_BLACK);
@@ -56,17 +76,16 @@ void kmain(nexus_boot_info_t *boot_info) {
     idt_init();
     console_status_ok();
 
-    console_print("Setting up paging (own PML4 + higher-half kernel)");
+    console_print("Setting up kernel address space (4 GiB identity map)");
     paging_init(boot_info);
     console_status_ok();
-    console_print("  -> kernel VMA: 0x");
-    console_print_hex(paging_kernel_virtual_base());
-    console_print(" | physical base: 0x");
-    console_print_hex(paging_kernel_physical_base());
-    console_print(" | higher-half: ");
-    console_print(paging_higher_half_ready() ? "READY\n" : "FAILED\n");
 
-    console_print("Initializing physical memory manager (PMM)");
+    console_print("Initializing physical memory manager (relocatable kernel)");
+    console_print("  -> kernel physical image: ");
+    console_print_hex(boot_info->kernel_phys_base);
+    console_print(" - ");
+    console_print_hex(boot_info->kernel_phys_end);
+    console_print("\n");
     pmm_init(boot_info);
     if (pmm_total_pages() != 0) {
         console_status_ok();
@@ -117,6 +136,17 @@ void kmain(nexus_boot_info_t *boot_info) {
         }
     }
 
+    console_print("Initializing kernel event queue (IRQ -> deferred events)");
+    kernel_events_init();
+    if (event_queue_is_ready()) {
+        console_status_ok();
+        console_print("  -> capacity: ");
+        console_print_dec(NEXUS_EVENT_QUEUE_CAPACITY);
+        console_print(" events | lock-free IRQ producer / kernel consumer\n");
+    } else {
+        console_status_warn();
+    }
+
     console_print("Remapping PIC (IRQ0-15 -> vectors 32-47)");
     pic_remap();
     console_status_ok();
@@ -124,6 +154,26 @@ void kmain(nexus_boot_info_t *boot_info) {
     console_print("Starting PIT timer (100 Hz)");
     pit_init(100);
     console_status_ok();
+
+    console_print("Initializing timer-driven scheduler");
+    scheduler_init(pit_get_frequency_hz());
+    if (scheduler_is_ready()) {
+        console_status_ok();
+        console_print("  -> quantum: ");
+        console_print_dec(scheduler_quantum_ticks());
+        console_print(" ticks (100 ms) | TCB/context switching + sleep/wakeup enabled\n");
+        uint64_t service_tid = thread_create(scheduler_service_thread, NULL);
+        if (service_tid != 0) {
+            console_print("  -> scheduler service thread: TID ");
+            console_print_dec(service_tid);
+            console_print(" / 16 KiB stack\n");
+        } else {
+            console_status_warn();
+            console_print("  -> scheduler service thread: unavailable\n");
+        }
+    } else {
+        console_status_warn();
+    }
 
     console_print("Initializing keyboard controller (i8042)");
     keyboard_init();
@@ -247,6 +297,11 @@ void kmain(nexus_boot_info_t *boot_info) {
     __asm__ volatile ("sti");
 
     for (;;) {
+        /* All keyboard/mouse/timer work captured by IRQ handlers is drained
+         * here in normal kernel context, with interrupts enabled. This is the
+         * event-queue boundary: shell commands are no longer
+         * executed from an interrupt handler. */
+        kernel_events_process();
         if (gui_is_active()) gui_update();
         __asm__ volatile ("hlt");
     }

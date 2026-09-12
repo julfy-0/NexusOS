@@ -4,8 +4,10 @@
 #include <stdint.h>
 
 /* Physical page manager. Pages are 4 KiB and are tracked with a bitmap.
- * The first implementation consumes EFI EfiConventionalMemory regions and
- * reserves all boot/kernel-owned memory before exposing pages to callers. */
+ * The implementation consumes EFI EfiConventionalMemory regions and
+ * reserves all boot/kernel-owned memory before exposing pages to callers.
+ * The kernel image is reserved using its runtime physical range from the
+ * UEFI boot contract, not its link-time address. */
 void pmm_init(const void *boot_info);
 
 uint64_t pmm_alloc_page(void);

@@ -9,9 +9,10 @@
 #include "keyboard.h"
 #include "pit.h"
 #include "panic.h"
-#include "page_fault.h"
 #include "mouse.h"
 #include "xhci.h"
+#include "event_queue.h"
+#include "scheduler.h"
 
 typedef struct {
     uint16_t offset_low;
@@ -88,13 +89,52 @@ void idt_init(void) {
     __asm__ volatile ("lidt (%0)" : : "r"(&idtp));
 }
 
-/* Vector 14 has its own diagnostic module. Keeping it outside the generic
- * exception dispatcher makes the CR2/error-code handling reusable and keeps
- * the IDT layer focused on interrupt routing. */
+/* Page fault (vector 14) — единственное исключение, у которого error
+ * code и CR2 реально расшифровываются на что-то полезное для человека,
+ * поэтому у него отдельная диагностика, а не общий exception_names[]. */
+#define PF_ERR_PRESENT   0x01 /* 0 = страницы не было вообще, 1 = была, но нарушение прав */
+#define PF_ERR_WRITE     0x02 /* 0 = чтение, 1 = запись */
+#define PF_ERR_USER      0x04 /* 0 = кольцо 0, 1 = кольцо 3 (у нас пока всегда 0, user mode ещё нет) */
+#define PF_ERR_RESERVED  0x08 /* 1 = в самой page table записан мусор в reserved-битах */
+#define PF_ERR_INSTR_FETCH 0x10 /* 1 = fault случился при выборке инструкции (NX), у нас NX не включён — всегда 0 */
+
+static void print_page_fault_details(interrupt_frame_t *f) {
+    uint64_t cr2;
+    __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
+
+    console_print("Page fault (vector 14, error code ");
+    console_print_hex(f->err_code);
+    console_print(")\n\n  Faulting address (CR2): ");
+    console_print_hex(cr2);
+    console_print("\n  Cause: ");
+    console_print((f->err_code & PF_ERR_PRESENT) ? "protection violation" : "page not present");
+    console_print(", ");
+    console_print((f->err_code & PF_ERR_WRITE) ? "write" : "read");
+    console_print(", ");
+    console_print((f->err_code & PF_ERR_USER) ? "user mode" : "kernel mode");
+    if (f->err_code & PF_ERR_RESERVED) {
+        console_print(", reserved bit set in page table entry (corrupt table!)");
+    }
+    if (f->err_code & PF_ERR_INSTR_FETCH) {
+        console_print(", instruction fetch");
+    }
+    console_print("\n\n  RIP: ");
+    console_print_hex(f->rip);
+    console_print("   CS: ");
+    console_print_hex(f->cs);
+    console_print("\n  RFLAGS: ");
+    console_print_hex(f->rflags);
+    console_print("\n");
+}
 
 static void panic_screen(interrupt_frame_t *f) {
-    console_set_color(COLOR_WHITE, 0x1D1035);
+    console_set_color(COLOR_WHITE, 0x1D1035); /* тёмно-фиолетовый фон, как BSOD/panic-экран */
     console_print("\n\n  *** NexusOS KERNEL PANIC ***\n\n  ");
+
+    if (f->vector == 14) {
+        print_page_fault_details(f);
+        return;
+    }
 
     if (f->vector < 32) {
         console_print(exception_names[f->vector]);
@@ -116,48 +156,28 @@ static void panic_screen(interrupt_frame_t *f) {
 
 void isr_handler(interrupt_frame_t *frame) {
     if (frame->vector < 32) {
-        if (frame->vector == 14) {
-            page_fault_handle(frame);
-        }
-
         panic_screen(frame);
         panic_countdown_and_reboot();
     }
 
-    /* Аппаратные IRQ (32..47): CPU сам сбрасывает IF на входе в interrupt
-     * gate, и sti нигде до этого места не звучит - так что всё время
-     * выполнения обработчика прерывания все прерывания (в т.ч. таймер)
-     * глобально запрещены.
-     *
-     * Это не проблема, пока обработчик короткий (pit_handle_irq() ниже).
-     * Но keyboard_handle_irq() -> shell_input_char() может (на Enter)
-     * синхронно выполнить целую команду шелла прямо тут же, в контексте
-     * этого прерывания (монолитное ядро, нет отложенной обработки/задач -
-     * см. docs/adr/0001-monolithic-kernel.md). Если такая команда сама
-     * ждёт прихода ДРУГОГО прерывания - как neofetch, который в
-     * cpu_measure_freq_mhz() крутится в цикле, ожидая приращения тиков
-     * PIT (IRQ0) для калибровки TSC, - получается гарантированный
-     * дедлок: PIT IRQ физически не может сработать, пока IF выключен.
-     *
-     * Поэтому шлём EOI и снимаем cli СРАЗУ, до вызова конкретного
-     * обработчика, а не после (как было раньше) - это позволяет другим
-     * IRQ (в первую очередь таймеру) прерывать обработку и не виснуть
-     * навечно. EOI перед sti - стандартный порядок: контроллер должен
-     * узнать, что этот IRQ обработан, до того как разрешать новые. */
-    pic_send_eoi((uint8_t)(frame->vector - 32));
-    __asm__ volatile ("sti");
+    /* IRQ handlers are deliberately capture-only. PIC EOI is sent before
+     * re-enabling interrupts so a timer/keyboard event can arrive while the
+     * main kernel loop is processing a previous event. No shell, GUI, xHCI
+     * polling, or packet parsing is performed here. */
+    if (frame->vector >= 32 && frame->vector <= 47) {
+        uint8_t irq = (uint8_t)(frame->vector - 32);
+        pic_send_eoi(irq);
+        __asm__ volatile ("sti");
 
-    if (frame->vector == 32) { /* IRQ0 = таймер */
-        pit_handle_irq();
-        /* Контроллер xHCI не использует своё аппаратное прерывание (см.
-         * drivers/usb/xhci.h) — event ring опрашивается прямо тут, на
-         * каждый тик таймера (100 Hz), этого достаточно для клавиатуры. */
-        xhci_poll();
-    }
-    if (frame->vector == 33) { /* IRQ1 = клавиатура */
-        keyboard_handle_irq();
-    }
-    if (frame->vector == 44) { /* IRQ12 = PS/2 мышь */
-        mouse_handle_irq();
+        if (irq == 0) {
+            pit_handle_irq();
+            scheduler_tick_irq();
+            (void)event_queue_push(NEXUS_EVENT_TIMER_TICK,
+                                   NEXUS_EVENT_SOURCE_TIMER, 0);
+        } else if (irq == 1) {
+            keyboard_handle_irq();
+        } else if (irq == 12) {
+            mouse_handle_irq();
+        }
     }
 }

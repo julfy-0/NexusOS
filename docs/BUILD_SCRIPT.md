@@ -1,6 +1,6 @@
 # NexusOS build.sh
 
-`build.sh` is the pretty command-line build frontend for NexusOS 0.5.1.
+`build.sh` is the pretty command-line build frontend for NexusOS 0.5.3.4
 
 Run from the project root:
 

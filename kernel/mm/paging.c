@@ -33,23 +33,11 @@ static uint64_t pml4[ENTRIES_PER_TABLE] __attribute__((aligned(4096)));
 static uint64_t pdpt[ENTRIES_PER_TABLE] __attribute__((aligned(4096)));
 static uint64_t pd_base[BASE_IDENTITY_GIB][ENTRIES_PER_TABLE] __attribute__((aligned(4096)));
 static uint64_t pd_extra[EXTRA_PD_SLOTS][ENTRIES_PER_TABLE] __attribute__((aligned(4096)));
-static uint64_t pdpt_high[ENTRIES_PER_TABLE] __attribute__((aligned(4096)));
-static uint64_t pd_kernel_high[ENTRIES_PER_TABLE] __attribute__((aligned(4096)));
-
-#define KERNEL_VIRT_BASE 0xFFFFFFFF80000000ULL
-#define KERNEL_PHYS_BASE 0x00200000ULL
-
-static uint64_t kernel_table_phys(const uint64_t *table) {
-    uint64_t virt = (uint64_t)(uintptr_t)table;
-    if (virt < KERNEL_VIRT_BASE) return 0;
-    return KERNEL_PHYS_BASE + (virt - KERNEL_VIRT_BASE);
-}
 
 /* pdpt_idx (0..511, номер 1 GiB слота), которому принадлежит pd_extra[i];
  * -1 = слот свободен. */
 static int extra_slot_owner[EXTRA_PD_SLOTS];
 static int extra_slots_used = 0;
-static int higher_half_ready = 0;
 
 static void zero_table(uint64_t *t) {
     for (int i = 0; i < ENTRIES_PER_TABLE; i++) t[i] = 0;
@@ -65,7 +53,7 @@ static uint64_t *pd_table_for(uint64_t phys) {
 
     if (pdpt_idx < BASE_IDENTITY_GIB) {
         if (!(pdpt[pdpt_idx] & PTE_PRESENT)) {
-            pdpt[pdpt_idx] = kernel_table_phys(pd_base[pdpt_idx]) | PTE_PRESENT | PTE_WRITABLE;
+            pdpt[pdpt_idx] = (uint64_t)(uintptr_t)pd_base[pdpt_idx] | PTE_PRESENT | PTE_WRITABLE;
         }
         return pd_base[pdpt_idx];
     }
@@ -87,7 +75,7 @@ static uint64_t *pd_table_for(uint64_t phys) {
     int slot = extra_slots_used++;
     extra_slot_owner[slot] = (int)pdpt_idx;
     zero_table(pd_extra[slot]);
-    pdpt[pdpt_idx] = kernel_table_phys(pd_extra[slot]) | PTE_PRESENT | PTE_WRITABLE;
+    pdpt[pdpt_idx] = (uint64_t)(uintptr_t)pd_extra[slot] | PTE_PRESENT | PTE_WRITABLE;
     return pd_extra[slot];
 }
 
@@ -116,16 +104,13 @@ static void map_region(uint64_t start, uint64_t end, uint64_t extra_flags) {
 void paging_init(nexus_boot_info_t *bi) {
     zero_table(pml4);
     zero_table(pdpt);
-    zero_table(pdpt_high);
-    zero_table(pd_kernel_high);
     for (int i = 0; i < BASE_IDENTITY_GIB; i++) zero_table(pd_base[i]);
     extra_slots_used = 0;
-    higher_half_ready = 0;
 
     /* PML4[0] покрывает нижние 512 GiB виртуального (=физического, пока
      * identity) адресного пространства — этого с большим запасом хватает
      * на всё, что мы мапим ниже. */
-    pml4[0] = kernel_table_phys(pdpt) | PTE_PRESENT | PTE_WRITABLE;
+    pml4[0] = (uint64_t)(uintptr_t)pdpt | PTE_PRESENT | PTE_WRITABLE;
 
     /* 1. Безусловно мапим базовый низкий диапазон (см. BASE_IDENTITY_GIB) —
      *    сюда попадает сам код ядра (грузится по 0x200000), его стек,
@@ -161,27 +146,7 @@ void paging_init(nexus_boot_info_t *bi) {
         map_region(bi->fb.base, bi->fb.base + bi->fb.size, 0);
     }
 
-    /* 4. Higher-half kernel alias. The real kernel is linked at
-     *    FFFFFFFF80000000 while the UEFI loader still places its bytes at
-     *    physical addresses beginning at 2 MiB. Keep identity mapping too,
-     *    so boot_info and early physical/MMIO pointers remain valid. */
-    pml4[511] = kernel_table_phys(pdpt_high) | PTE_PRESENT | PTE_WRITABLE;
-    pdpt_high[510] = kernel_table_phys(pd_kernel_high) | PTE_PRESENT | PTE_WRITABLE;
-
-    extern char __kernel_phys_start;
-    extern char __kernel_phys_end;
-    uint64_t kernel_phys_start = (uint64_t)(uintptr_t)&__kernel_phys_start;
-    uint64_t kernel_phys_end = (uint64_t)(uintptr_t)&__kernel_phys_end;
-    uint64_t high_start = kernel_phys_start & ~(PAGE_2M - 1ULL);
-    uint64_t high_end = (kernel_phys_end + PAGE_2M - 1ULL) & ~(PAGE_2M - 1ULL);
-    uint64_t high_index = 0;
-    for (uint64_t phys = high_start; phys < high_end && high_index < ENTRIES_PER_TABLE;
-         phys += PAGE_2M, high_index++) {
-        pd_kernel_high[high_index] = phys | PTE_PRESENT | PTE_WRITABLE | PTE_HUGE;
-    }
-
-    __asm__ volatile ("mov %0, %%cr3" : : "r"(kernel_table_phys(pml4)) : "memory");
-    higher_half_ready = 1;
+    __asm__ volatile ("mov %0, %%cr3" : : "r"((uint64_t)(uintptr_t)pml4) : "memory");
 }
 
 void paging_map_region(uint64_t start, uint64_t end) {
@@ -199,18 +164,6 @@ uint64_t paging_base_identity_gib(void) {
     return BASE_IDENTITY_GIB;
 }
 
-uint64_t paging_kernel_virtual_base(void) {
-    return KERNEL_VIRT_BASE;
-}
-
-uint64_t paging_kernel_physical_base(void) {
-    return KERNEL_PHYS_BASE;
-}
-
-int paging_higher_half_ready(void) {
-    return higher_half_ready;
-}
-
 /* -------------------------------------------------------------------------
  * 4 KiB page-table operations for VMM.
  *
@@ -226,8 +179,9 @@ int paging_higher_half_ready(void) {
 #define PT_INDEX_MASK 0x1FFULL
 
 static uint64_t *table_from_phys(uint64_t phys) {
-    /* The low identity map remains active after the higher-half transition,
-     * so page-table pages below 4 GiB can still be accessed directly. */
+    /* The current kernel is identity-mapped through the first 4 GiB. Keep
+     * page-table allocations there until the higher-half/recursive mapping
+     * milestone provides a permanent mapping for arbitrary physical RAM. */
     if (phys >= 0x100000000ULL) return NULL;
     return (uint64_t *)(uintptr_t)phys;
 }

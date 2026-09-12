@@ -4,6 +4,8 @@
 #include "pmm.h"
 #include "kstate.h"
 #include "heap.h"
+#include "scheduler.h"
+#include "kernel_events.h"
 
 static void print_mib(uint64_t pages) {
     console_print_dec((pages * 4096ULL) / (1024ULL * 1024ULL));
@@ -57,5 +59,54 @@ void meminfo_run(void) {
     console_print(" MiB\n\n");
 
     console_print("PMM status:         active\n");
-    console_print("Allocation:         4 KiB physical pages\n");
+    console_print("Allocation:         4 KiB physical pages\n\n");
+
+    console_set_color(COLOR_GREEN, COLOR_BLACK);
+    console_print("Scheduler\n");
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
+    console_print("  Status:            ");
+    console_print(scheduler_is_ready() ? "ready\n" : "disabled\n");
+    console_print("  Timer:             ");
+    console_print_dec(scheduler_timer_hz());
+    console_print(" Hz\n");
+    console_print("  Quantum:           ");
+    console_print_dec(scheduler_quantum_ticks());
+    console_print(" ticks\n");
+    console_print("  Scheduler ticks:   ");
+    console_print_dec(scheduler_ticks());
+    console_print("\n");
+    console_print("  Quantum expirations:");
+    console_print_dec(scheduler_quantum_expirations());
+    console_print("\n");
+    console_print("  Context switches:  ");
+    console_print_dec(scheduler_context_switches());
+    console_print("\n");
+    console_print("  Threads:           ");
+    console_print_dec(scheduler_thread_count());
+    console_print(" / ");
+    console_print_dec(scheduler_max_threads());
+    console_print("\n  Ready queue:       ");
+    console_print_dec(scheduler_ready_count());
+    console_print("\n  Sleeping:          ");
+    console_print_dec(scheduler_sleeping_count());
+    console_print("\n  Current TID:       ");
+    console_print_dec(scheduler_current_thread_id());
+    console_print("\n");
+
+    console_set_color(COLOR_GREEN, COLOR_BLACK);
+    console_print("Kernel events\n");
+    console_set_color(COLOR_WHITE, COLOR_BLACK);
+    console_print("  Processed:         ");
+    console_print_dec(kernel_events_processed());
+    console_print("\n");
+    console_print("  Keyboard sequence: ");
+    console_print_dec(kernel_events_sequence(NEXUS_EVENT_KEYBOARD_SCANCODE));
+    console_print(" | waiters: ");
+    console_print_dec(kernel_events_waiter_count(NEXUS_EVENT_KEYBOARD_SCANCODE));
+    console_print("\n");
+    console_print("  Mouse sequence:    ");
+    console_print_dec(kernel_events_sequence(NEXUS_EVENT_MOUSE_BYTE));
+    console_print(" | waiters: ");
+    console_print_dec(kernel_events_waiter_count(NEXUS_EVENT_MOUSE_BYTE));
+    console_print("\n");
 }

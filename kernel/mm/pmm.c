@@ -22,8 +22,6 @@ static uint64_t g_free_pages;
 static uint64_t g_max_physical_address;
 static int g_ready;
 
-extern char __kernel_phys_start;
-extern char __kernel_phys_end;
 
 static void bitmap_set(uint64_t page) {
     g_bitmap[page >> 3] |= (uint8_t)(1U << (page & 7));
@@ -139,13 +137,13 @@ void pmm_init(const void *boot_info_ptr) {
      * and keeps the first page permanently unavailable. */
     reserve_range(0, 0x200000ULL);
 
-    /* The linker symbols cover .text/.rodata/.data/.bss, including this PMM
-     * bitmap and the page tables. */
-    reserve_range((uint64_t)(uintptr_t)&__kernel_phys_start,
-                  (uint64_t)(uintptr_t)&__kernel_phys_end);
+    /* The kernel is relocatable. Reserve the physical image range supplied
+     * by the UEFI loader instead of using link-time linker symbols. */
+    if (bi->kernel_phys_end > bi->kernel_phys_base) {
+        reserve_range(bi->kernel_phys_base, bi->kernel_phys_end);
+    }
 
-    /* Boot info itself is a firmware-owned static object. The memory map was
-     * allocated from EfiLoaderData, so neither may be recycled by PMM. */
+    /* Boot info and the final memory map are loader-owned allocations. */
     reserve_range((uint64_t)(uintptr_t)bi,
                   (uint64_t)(uintptr_t)bi + sizeof(*bi));
     reserve_range(bi->mmap.map_base, bi->mmap.map_base + bi->mmap.map_size);

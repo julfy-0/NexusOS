@@ -8,7 +8,7 @@ set -u -o pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-VERSION="0.5.1"
+VERSION="0.5.3.6"
 BAR_WIDTH=26
 LOG_FILE="build_output.txt"
 NO_CLEAN=0

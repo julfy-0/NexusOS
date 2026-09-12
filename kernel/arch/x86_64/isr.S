@@ -113,4 +113,27 @@ isr_common_stub:
     add $16, %rsp          # убираем vector и err_code
     iretq
 
+
+/* Callee-saved kernel context switch used by the TCB scheduler.
+ * RDI = &old->rsp, RSI = new->rsp. Interrupts are disabled by the caller. */
+.global arch_context_switch
+.type arch_context_switch, @function
+arch_context_switch:
+    pushq %r15
+    pushq %r14
+    pushq %r13
+    pushq %r12
+    pushq %rbx
+    pushq %rbp
+    movq %rsp, (%rdi)
+    movq %rsi, %rsp
+    popq %rbp
+    popq %rbx
+    popq %r12
+    popq %r13
+    popq %r14
+    popq %r15
+    ret
+.size arch_context_switch, .-arch_context_switch
+
 .section .note.GNU-stack,"",@progbits

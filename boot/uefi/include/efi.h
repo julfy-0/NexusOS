@@ -172,6 +172,11 @@ typedef EFI_STATUS (EFIAPI *EFI_ALLOCATE_PAGES)(
     IN OUT EFI_PHYSICAL_ADDRESS *Memory
 );
 
+typedef EFI_STATUS (EFIAPI *EFI_FREE_PAGES)(
+    IN EFI_PHYSICAL_ADDRESS Memory,
+    IN UINTN Pages
+);
+
 typedef EFI_STATUS (EFIAPI *EFI_EXIT_BOOT_SERVICES)(
     IN EFI_HANDLE ImageHandle,
     IN UINTN MapKey
@@ -210,7 +215,7 @@ typedef struct {
     void *RaiseTPL;
     void *RestoreTPL;
     EFI_ALLOCATE_PAGES AllocatePages;
-    void *FreePages;
+    EFI_FREE_PAGES FreePages;
     EFI_GET_MEMORY_MAP GetMemoryMap;
     EFI_ALLOCATE_POOL AllocatePool;
     EFI_FREE_POOL FreePool;

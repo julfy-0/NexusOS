@@ -1,4 +1,4 @@
-# NexusOS 0.5.1 — existing freestanding x86_64 build
+# NexusOS 0.5.3.4 — Threads & TCB
 #
 # This Makefile is the single source of truth for compilation and linking.
 # build.sh is only a progress/UX frontend around the real targets below.
@@ -30,10 +30,10 @@ LDFLAGS_EFI := -m i386pep -nostdlib -shared -Bsymbolic -e efi_main --subsystem 1
 # Kernel: freestanding ELF64, System V ABI.
 CFLAGS_KERNEL := -ffreestanding -fno-stack-protector -fno-stack-check \
                  -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mgeneral-regs-only \
-                 -fno-pic -fno-pie -mcmodel=kernel -fno-ident \
+                 -fPIE -fno-ident \
                  -Wall -Wextra -O2 $(INCLUDES)
 CFLAGS_ASM := -ffreestanding -fno-ident -mno-red-zone
-LDFLAGS_KERNEL := -nostdlib -static -T kernel/arch/x86_64/linker.ld
+LDFLAGS_KERNEL := -nostdlib -shared -Bsymbolic -T kernel/arch/x86_64/linker.ld
 
 # -----------------------------------------------------------------------------
 # Source/object manifests

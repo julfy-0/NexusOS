@@ -9,6 +9,7 @@
 #include "gui.h"
 #include "console.h"
 #include "io.h"
+#include "event_queue.h"
 
 #define KBD_DATA_PORT    0x60
 #define KBD_STATUS_PORT  0x64
@@ -141,9 +142,7 @@ static void dispatch_special(uint8_t sc, int released) {
     else if (sc == 0x4D) (void)gui_handle_key(GUI_KEY_RIGHT);
 }
 
-void keyboard_handle_irq(void) {
-    if (!(inb(KBD_STATUS_PORT) & KBD_STATUS_OBF)) return;
-    uint8_t sc = inb(KBD_DATA_PORT);
+void keyboard_process_scancode(uint8_t sc) {
 
     if (sc == SC_EXTENDED) {
         g_extended = 1;
@@ -191,6 +190,17 @@ void keyboard_handle_irq(void) {
         if (was_gui && !gui_is_active()) shell_return_from_desktop();
     } else {
         shell_input_char(c);
+    }
+}
+
+void keyboard_handle_irq(void) {
+    /* IRQ context: drain a small bounded burst, but do not touch shell/GUI
+     * state. All interpretation happens in kernel_events_process(). */
+    for (int i = 0; i < 16; ++i) {
+        if (!(inb(KBD_STATUS_PORT) & KBD_STATUS_OBF)) break;
+        (void)event_queue_push(NEXUS_EVENT_KEYBOARD_SCANCODE,
+                               NEXUS_EVENT_SOURCE_KEYBOARD,
+                               inb(KBD_DATA_PORT));
     }
 }
 

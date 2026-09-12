@@ -157,46 +157,218 @@ static void *load_file(EFI_FILE_PROTOCOL *root, CHAR16 *name, UINTN *out_size) {
     return buffer;
 }
 
-/* Парсит ELF64, раскладывает PT_LOAD сегменты по их физическим адресам.
- * Возвращает точку входа. */
-static uint64_t load_elf(void *elf_data) {
-    Elf64_Ehdr *eh = (Elf64_Ehdr *)elf_data;
+/* -------------------------------------------------------------------------
+ * ELF loader
+ * -------------------------------------------------------------------------
+ *
+ * The kernel is linked at NEXUS_KERNEL_LINK_BASE but is emitted as ET_DYN.
+ * We therefore allocate one contiguous physical image below 4 GiB, copy all
+ * PT_LOAD segments into it, and apply only R_X86_64_RELATIVE relocations.
+ * This removes the old dependency on AllocateAddress(0x200000) and makes
+ * the boot path independent of whatever low memory UEFI/OVMF happens to use.
+ */
+typedef struct {
+    uint64_t phys_base;
+    uint64_t phys_end;
+    uint64_t link_base;
+    uint64_t entry;
+    uint64_t image_size;
+} kernel_load_result_t;
 
+static uint64_t align_down_4k(uint64_t value) {
+    return value & ~0xFFFULL;
+}
+
+static uint64_t align_up_4k_checked(uint64_t value) {
+    if (value > UINT64_MAX - 0xFFFULL) return 0;
+    return (value + 0xFFFULL) & ~0xFFFULL;
+}
+
+static int range_valid(uint64_t start, uint64_t size, uint64_t *end_out) {
+    if (size > UINT64_MAX - start) return 0;
+    if (end_out) *end_out = start + size;
+    return 1;
+}
+
+static int is_power_of_two(uint64_t value) {
+    return value == 0 || (value & (value - 1ULL)) == 0;
+}
+
+static void *allocate_low_pages(UINTN pages, EFI_PHYSICAL_ADDRESS *out_address) {
+    if (!pages || !out_address) return NULL;
+
+    EFI_PHYSICAL_ADDRESS max_address = 0xFFFFFFFFULL;
+    EFI_STATUS status = g_bs->AllocatePages(AllocateMaxAddress, EfiLoaderData,
+                                             pages, &max_address);
+    if (EFI_ERROR(status)) return NULL;
+    *out_address = max_address;
+    return (void *)(uintptr_t)max_address;
+}
+
+static int apply_relative_relocations(uint64_t load_base,
+                                      uint64_t link_base,
+                                      uint64_t image_size,
+                                      uint64_t dyn_vaddr,
+                                      uint64_t dyn_size,
+                                      uint64_t min_vaddr) {
+    if (dyn_size < sizeof(Elf64_Dyn)) return 0;
+    if (dyn_vaddr < min_vaddr || dyn_vaddr - min_vaddr >= image_size) return 0;
+    if (dyn_size > image_size - (dyn_vaddr - min_vaddr)) return 0;
+
+    Elf64_Dyn *dyn = (Elf64_Dyn *)(uintptr_t)(load_base + (dyn_vaddr - min_vaddr));
+    uint64_t rela_vaddr = 0;
+    uint64_t rela_size = 0;
+    uint64_t rela_ent = sizeof(Elf64_Rela);
+
+    uint64_t dyn_count = dyn_size / sizeof(Elf64_Dyn);
+    for (uint64_t i = 0; i < dyn_count; ++i) {
+        switch ((uint64_t)dyn[i].d_tag) {
+            case DT_RELA:    rela_vaddr = dyn[i].d_val; break;
+            case DT_RELASZ:  rela_size = dyn[i].d_val; break;
+            case DT_RELAENT: rela_ent = dyn[i].d_val; break;
+            case DT_NULL:    i = dyn_count; break;
+            default: break;
+        }
+    }
+
+    if (rela_size == 0) return 1;
+    if (rela_ent != sizeof(Elf64_Rela) || (rela_size % rela_ent) != 0) return 0;
+    if (rela_vaddr < min_vaddr || rela_vaddr - min_vaddr >= image_size) return 0;
+    if (rela_size > image_size - (rela_vaddr - min_vaddr)) return 0;
+
+    Elf64_Rela *rela = (Elf64_Rela *)(uintptr_t)(load_base + (rela_vaddr - min_vaddr));
+    uint64_t count = rela_size / rela_ent;
+    uint64_t load_bias = load_base - link_base;
+
+    for (uint64_t i = 0; i < count; ++i) {
+        uint32_t type = ELF64_R_TYPE(rela[i].r_info);
+        if (type != R_X86_64_RELATIVE) {
+            panic(u"kernel.elf: unsupported relocation");
+        }
+
+        if (rela[i].r_offset < min_vaddr ||
+            rela[i].r_offset - min_vaddr > image_size - sizeof(uint64_t)) {
+            return 0;
+        }
+
+        uint64_t *where = (uint64_t *)(uintptr_t)(load_base + (rela[i].r_offset - min_vaddr));
+        uint64_t value = load_bias + (uint64_t)rela[i].r_addend;
+        *where = value;
+    }
+
+    return 1;
+}
+
+static int load_elf(void *elf_data, UINTN file_size, kernel_load_result_t *result) {
+    if (!elf_data || !result || file_size < sizeof(Elf64_Ehdr)) {
+        panic(u"kernel.elf: truncated header");
+    }
+
+    Elf64_Ehdr *eh = (Elf64_Ehdr *)elf_data;
     if (eh->e_ident[0] != ELF_MAGIC0 || eh->e_ident[1] != ELF_MAGIC1 ||
         eh->e_ident[2] != ELF_MAGIC2 || eh->e_ident[3] != ELF_MAGIC3) {
         panic(u"kernel.elf: bad magic");
     }
-    if (eh->e_ident[4] != ELFCLASS64) {
-        panic(u"kernel.elf: not 64-bit");
+    if (eh->e_ident[4] != ELFCLASS64 || eh->e_ident[5] != ELFDATA2LSB) {
+        panic(u"kernel.elf: unsupported format");
     }
-    if (eh->e_machine != EM_X86_64) {
-        panic(u"kernel.elf: not x86_64");
+    if (eh->e_machine != EM_X86_64 || eh->e_type != ET_DYN) {
+        panic(u"kernel.elf: expected relocatable ET_DYN x86_64 image");
+    }
+    if (eh->e_phentsize < sizeof(Elf64_Phdr) || eh->e_phnum == 0) {
+        panic(u"kernel.elf: invalid program headers");
+    }
+    if (eh->e_phoff > file_size ||
+        (uint64_t)eh->e_phnum > ((uint64_t)file_size - eh->e_phoff) / eh->e_phentsize) {
+        panic(u"kernel.elf: program headers outside file");
     }
 
     Elf64_Phdr *phdrs = (Elf64_Phdr *)((uint8_t *)elf_data + eh->e_phoff);
+    uint64_t min_vaddr = UINT64_MAX;
+    uint64_t max_vaddr = 0;
+    uint64_t dyn_vaddr = 0;
+    uint64_t dyn_size = 0;
+    int load_count = 0;
 
-    for (uint16_t i = 0; i < eh->e_phnum; i++) {
+    for (uint16_t i = 0; i < eh->e_phnum; ++i) {
         Elf64_Phdr *ph = &phdrs[i];
+        if (ph->p_type == PT_DYNAMIC) {
+            dyn_vaddr = ph->p_vaddr;
+            dyn_size = ph->p_memsz;
+            continue;
+        }
         if (ph->p_type != PT_LOAD) continue;
+        ++load_count;
 
-        UINTN pages = (ph->p_memsz + 4095) / 4096;
-        EFI_PHYSICAL_ADDRESS addr = ph->p_paddr;
-
-        EFI_STATUS status = g_bs->AllocatePages(AllocateAddress, EfiLoaderData, pages, &addr);
-        if (EFI_ERROR(status)) {
-            panic(u"AllocatePages for segment failed");
+        uint64_t file_end, mem_end;
+        if (!range_valid(ph->p_offset, ph->p_filesz, &file_end) ||
+            file_end > file_size || ph->p_memsz < ph->p_filesz ||
+            !range_valid(ph->p_vaddr, ph->p_memsz, &mem_end) ||
+            !is_power_of_two(ph->p_align)) {
+            panic(u"kernel.elf: invalid load segment");
         }
 
-        /* Копируем данные сегмента из файла и обнуляем .bss-хвост */
-        memcpy((void *)ph->p_paddr, (uint8_t *)elf_data + ph->p_offset, ph->p_filesz);
-        if (ph->p_memsz > ph->p_filesz) {
-            memset((void *)(ph->p_paddr + ph->p_filesz), 0, ph->p_memsz - ph->p_filesz);
+        uint64_t seg_start = align_down_4k(ph->p_vaddr);
+        uint64_t seg_end = align_up_4k_checked(mem_end);
+        if (seg_end == 0 || seg_end <= seg_start) {
+            panic(u"kernel.elf: invalid segment range");
         }
+        if (seg_start < min_vaddr) min_vaddr = seg_start;
+        if (seg_end > max_vaddr) max_vaddr = seg_end;
     }
 
-    return eh->e_entry;
-}
+    if (load_count == 0 || min_vaddr == UINT64_MAX || max_vaddr <= min_vaddr) {
+        panic(u"kernel.elf: no loadable segments");
+    }
 
+    /* The current kernel MMU deliberately requires the image to remain below
+     * 4 GiB. AllocateMaxAddress gives us the strongest possible UEFI guarantee. */
+    uint64_t image_size = max_vaddr - min_vaddr;
+    if (min_vaddr != NEXUS_KERNEL_LINK_BASE || image_size >= 0x100000000ULL) {
+        panic(u"kernel.elf: unsupported image layout");
+    }
+    UINTN pages = (UINTN)(image_size / 4096ULL);
+    if (pages == 0 || (uint64_t)pages * 4096ULL != image_size) {
+        panic(u"kernel.elf: image size overflow");
+    }
+
+    EFI_PHYSICAL_ADDRESS actual_base = 0;
+    if (!allocate_low_pages(pages, &actual_base)) {
+        panic(u"kernel.elf: cannot allocate physical image below 4 GiB");
+    }
+
+    memset((void *)(uintptr_t)actual_base, 0, image_size);
+
+    for (uint16_t i = 0; i < eh->e_phnum; ++i) {
+        Elf64_Phdr *ph = &phdrs[i];
+        if (ph->p_type != PT_LOAD || ph->p_filesz == 0) continue;
+
+        uint64_t dest_offset = ph->p_vaddr - min_vaddr;
+        if (dest_offset > image_size || ph->p_filesz > image_size - dest_offset) {
+            panic(u"kernel.elf: segment outside allocated image");
+        }
+        memcpy((void *)(uintptr_t)(actual_base + dest_offset),
+               (uint8_t *)elf_data + ph->p_offset,
+               ph->p_filesz);
+    }
+
+    if (dyn_vaddr == 0 || dyn_size == 0 ||
+        !apply_relative_relocations(actual_base, min_vaddr, image_size,
+                                    dyn_vaddr, dyn_size, min_vaddr)) {
+        panic(u"kernel.elf: relocation processing failed");
+    }
+
+    if (eh->e_entry < min_vaddr || eh->e_entry >= max_vaddr) {
+        panic(u"kernel.elf: entry outside image");
+    }
+
+    result->phys_base = actual_base;
+    result->phys_end = actual_base + image_size;
+    result->link_base = min_vaddr;
+    result->entry = actual_base + (eh->e_entry - min_vaddr);
+    result->image_size = image_size;
+    return 1;
+}
 
 static int guid_equal(const EFI_GUID *a, const EFI_GUID *b) {
     return a->Data1 == b->Data1 && a->Data2 == b->Data2 &&
@@ -320,119 +492,142 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     g_st = SystemTable;
     g_bs = SystemTable->BootServices;
 
+    /* All long-lived hand-off data is explicitly placed below 4 GiB because
+     * the first NexusOS address space is identity-mapped only in that range. */
+    EFI_PHYSICAL_ADDRESS boot_info_phys = 0;
+    nexus_boot_info_t *boot_info = (nexus_boot_info_t *)allocate_low_pages(1, &boot_info_phys);
+    if (!boot_info) panic(u"cannot allocate boot information page");
+    memset(boot_info, 0, 4096);
+    boot_info->magic = NEXUS_BOOT_MAGIC;
 
-    static nexus_boot_info_t boot_info;
-    memset(&boot_info, 0, sizeof(boot_info));
-    boot_info.magic = NEXUS_BOOT_MAGIC;
-    detect_system_identity(&boot_info);
-    detect_acpi(&boot_info);
+    detect_system_identity(boot_info);
+    detect_acpi(boot_info);
 
-    /* ---- 1. Видеорежим через GOP ---- */
+    /* ---- GOP ---- */
     EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
     EFI_STATUS status = g_bs->LocateProtocol(&gop_guid, NULL, (void **)&gop);
-    if (EFI_ERROR(status) || gop == NULL) {
+    if (EFI_ERROR(status) || gop == NULL || gop->Mode == NULL || gop->Mode->Info == NULL) {
         panic(u"GOP not found - cannot continue without a framebuffer");
     }
 
-    boot_info.fb.base = gop->Mode->FrameBufferBase;
-    boot_info.fb.size = gop->Mode->FrameBufferSize;
-    boot_info.fb.width = gop->Mode->Info->HorizontalResolution;
-    boot_info.fb.height = gop->Mode->Info->VerticalResolution;
-    boot_info.fb.pixels_per_scanline = gop->Mode->Info->PixelsPerScanLine;
+    boot_info->fb.base = gop->Mode->FrameBufferBase;
+    boot_info->fb.size = gop->Mode->FrameBufferSize;
+    boot_info->fb.width = gop->Mode->Info->HorizontalResolution;
+    boot_info->fb.height = gop->Mode->Info->VerticalResolution;
+    boot_info->fb.pixels_per_scanline = gop->Mode->Info->PixelsPerScanLine;
 
     if (gop->Mode->Info->PixelFormat == PixelRedGreenBlueReserved8BitPerColor) {
-        boot_info.fb.pixel_format = NEXUS_PIXFMT_RGB;
+        boot_info->fb.pixel_format = NEXUS_PIXFMT_RGB;
     } else if (gop->Mode->Info->PixelFormat == PixelBlueGreenRedReserved8BitPerColor) {
-        boot_info.fb.pixel_format = NEXUS_PIXFMT_BGR;
+        boot_info->fb.pixel_format = NEXUS_PIXFMT_BGR;
     } else {
-        boot_info.fb.pixel_format = NEXUS_PIXFMT_OTHER;
+        boot_info->fb.pixel_format = NEXUS_PIXFMT_OTHER;
     }
-
-    if (boot_info.fb.pixel_format == NEXUS_PIXFMT_OTHER) {
+    if (boot_info->fb.pixel_format == NEXUS_PIXFMT_OTHER) {
         panic(u"Unsupported framebuffer pixel format");
     }
 
     boot_graphics_init(gop);
-    boot_progress(1, 7, u"");
+    boot_progress(1, 6, u"");
 
-    boot_progress(2, 7, u"Opening boot volume");
-
-    /* ---- 2. Открываем том, с которого загрузились, и читаем kernel.elf ---- */
+    /* ---- Locate boot volume ---- */
     EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
     EFI_LOADED_IMAGE_PROTOCOL *loaded_image = NULL;
     status = g_bs->HandleProtocol(ImageHandle, &loaded_image_guid, (void **)&loaded_image);
-    if (EFI_ERROR(status)) {
-        panic(u"cannot get LoadedImageProtocol");
-    }
+    if (EFI_ERROR(status) || !loaded_image) panic(u"cannot get LoadedImageProtocol");
 
     EFI_GUID sfs_guid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
     EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *sfs = NULL;
     status = g_bs->HandleProtocol(loaded_image->DeviceHandle, &sfs_guid, (void **)&sfs);
-    if (EFI_ERROR(status)) {
-        panic(u"cannot get SimpleFileSystemProtocol");
-    }
+    if (EFI_ERROR(status) || !sfs) panic(u"cannot get SimpleFileSystemProtocol");
 
     EFI_FILE_PROTOCOL *root = NULL;
     status = sfs->OpenVolume(sfs, &root);
-    if (EFI_ERROR(status)) {
-        panic(u"OpenVolume failed");
-    }
+    if (EFI_ERROR(status) || !root) panic(u"OpenVolume failed");
 
-    boot_progress(3, 7, u"Loading kernel image");
-    UINTN kernel_size;
+    boot_progress(2, 6, u"");
+    UINTN kernel_size = 0;
     void *kernel_data = load_file(root, u"\\kernel.elf", &kernel_size);
 
-    boot_progress(4, 7, u"Preparing kernel memory");
-    uint64_t entry_point = load_elf(kernel_data);
+    boot_progress(3, 6, u"");
+    kernel_load_result_t kernel;
+    if (!load_elf(kernel_data, kernel_size, &kernel)) {
+        panic(u"kernel.elf: load failed");
+    }
 
-    boot_progress(5, 7, u"Finalizing memory map");
+    /* No references into the ELF file are needed after relocation. Releasing
+     * this buffer before the final memory map keeps the hand-off minimal. */
+    g_bs->FreePool(kernel_data);
+    kernel_data = NULL;
+    root->Close(root);
 
-    /* ---- 3. Финальная memory map + ExitBootServices ---- */
+    boot_info->kernel_phys_base = kernel.phys_base;
+    boot_info->kernel_phys_end = kernel.phys_end;
+    boot_info->kernel_image_size = kernel.image_size;
+    boot_info->kernel_link_base = kernel.link_base;
+    boot_info->kernel_entry = kernel.entry;
+
+    boot_progress(4, 6, u"");
+
+    /* ---- Final memory map ---- */
     UINTN mmap_size = 0;
-    EFI_MEMORY_DESCRIPTOR *mmap = NULL;
     UINTN map_key = 0;
     UINTN desc_size = 0;
     uint32_t desc_version = 0;
+    status = g_bs->GetMemoryMap(&mmap_size, NULL, &map_key, &desc_size, &desc_version);
+    if (desc_size == 0) panic(u"GetMemoryMap returned invalid descriptor size");
 
-    /* Первый вызов — узнаём нужный размер буфера */
-    g_bs->GetMemoryMap(&mmap_size, mmap, &map_key, &desc_size, &desc_version);
-    mmap_size += desc_size * 8; /* запас: сама аллокация буфера меняет карту */
-    g_bs->AllocatePool(EfiLoaderData, mmap_size, (void **)&mmap);
+    mmap_size += desc_size * 16 + 4096;
+    UINTN mmap_pages = (mmap_size + 4095) / 4096;
+    EFI_PHYSICAL_ADDRESS mmap_phys = 0;
+    EFI_MEMORY_DESCRIPTOR *mmap = (EFI_MEMORY_DESCRIPTOR *)allocate_low_pages(mmap_pages, &mmap_phys);
+    if (!mmap) panic(u"cannot allocate final memory map");
 
-    status = g_bs->GetMemoryMap(&mmap_size, mmap, &map_key, &desc_size, &desc_version);
-    if (EFI_ERROR(status)) {
-        panic(u"GetMemoryMap (final) failed");
+    for (;;) {
+        UINTN current_size = mmap_pages * 4096;
+        status = g_bs->GetMemoryMap(&current_size, mmap, &map_key, &desc_size, &desc_version);
+        if (!EFI_ERROR(status)) {
+            mmap_size = current_size;
+            break;
+        }
+        if (status != EFI_BUFFER_TOO_SMALL) panic(u"GetMemoryMap (final) failed");
+        if (g_bs->FreePages) g_bs->FreePages(mmap_phys, mmap_pages);
+        mmap_pages = (current_size + desc_size * 16 + 4095) / 4096;
+        if (mmap_pages == 0) panic(u"GetMemoryMap size overflow");
+        mmap = (EFI_MEMORY_DESCRIPTOR *)allocate_low_pages(mmap_pages, &mmap_phys);
+        if (!mmap) panic(u"cannot grow final memory map");
     }
 
-    boot_info.mmap.map_base = (uint64_t)(uintptr_t)mmap;
-    boot_info.mmap.map_size = mmap_size;
-    boot_info.mmap.descriptor_size = desc_size;
-    boot_info.mmap.descriptor_version = desc_version;
+    boot_info->mmap.map_base = (uint64_t)(uintptr_t)mmap;
+    boot_info->mmap.map_size = mmap_size;
+    boot_info->mmap.descriptor_size = desc_size;
+    boot_info->mmap.descriptor_version = desc_version;
 
-    boot_progress(7, 7, u"Starting NexusOS 0.5.1 - Desktop Update");
+    boot_progress(5, 6, u"");
+
+    /* Do not call any Boot Service between this final GetMemoryMap and
+     * ExitBootServices. If the key is stale, refresh the map immediately. */
     status = g_bs->ExitBootServices(ImageHandle, map_key);
     if (EFI_ERROR(status)) {
-        /* Карта могла устареть между вызовами (это нормально по спеке) —
-         * пробуем ещё раз с самого начала. */
-        mmap_size = boot_info.mmap.map_size + desc_size * 8;
-        status = g_bs->GetMemoryMap(&mmap_size, mmap, &map_key, &desc_size, &desc_version);
+        UINTN retry_size = mmap_pages * 4096;
+        status = g_bs->GetMemoryMap(&retry_size, mmap, &map_key, &desc_size, &desc_version);
+        if (EFI_ERROR(status)) panic(u"GetMemoryMap retry failed");
+        boot_info->mmap.map_size = retry_size;
+        boot_info->mmap.descriptor_size = desc_size;
+        boot_info->mmap.descriptor_version = desc_version;
         status = g_bs->ExitBootServices(ImageHandle, map_key);
-        if (EFI_ERROR(status)) {
-            panic(u"ExitBootServices failed twice");
-        }
+        if (EFI_ERROR(status)) panic(u"ExitBootServices failed");
     }
 
-    /* С этого момента печатать через ConOut больше нельзя — Boot Services мертвы. */
-
     typedef void (*kernel_entry_t)(nexus_boot_info_t *);
-    kernel_entry_t kernel_entry = (kernel_entry_t)entry_point;
-    kernel_entry(&boot_info);
+    kernel_entry_t kernel_entry = (kernel_entry_t)(uintptr_t)boot_info->kernel_entry;
+    kernel_entry(boot_info);
 
-    /* Ядро не должно возвращаться сюда. Если вернулось — зависаем. */
     for (;;) {
-        __asm__ volatile("hlt");
+        __asm__ volatile ("cli; hlt");
     }
 
     return EFI_SUCCESS;
 }
+

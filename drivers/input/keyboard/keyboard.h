@@ -4,6 +4,7 @@
 
 void keyboard_init(void);
 void keyboard_handle_irq(void);
+void keyboard_process_scancode(uint8_t scancode);
 int keyboard_is_present(void);
 
 int keyboard_shift_down(void);

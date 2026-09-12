@@ -12,8 +12,16 @@
 #define ELFCLASS64 2
 #define ELFDATA2LSB 1
 #define ET_EXEC 2
+#define ET_DYN 3
 #define EM_X86_64 62
 #define PT_LOAD 1
+#define PT_DYNAMIC 2
+#define R_X86_64_RELATIVE 8
+
+#define DT_NULL 0
+#define DT_RELA 7
+#define DT_RELASZ 8
+#define DT_RELAENT 9
 
 typedef struct {
     uint8_t  e_ident[16];
@@ -44,3 +52,18 @@ typedef struct {
 } Elf64_Phdr;
 
 #endif
+
+typedef struct {
+    int64_t  d_tag;
+    uint64_t d_val;
+} Elf64_Dyn;
+
+typedef struct {
+    uint64_t r_offset;
+    uint64_t r_info;
+    int64_t  r_addend;
+} Elf64_Rela;
+
+#define ELF64_R_TYPE(info) ((uint32_t)((info) & 0xFFFFFFFFULL))
+#define ELF64_R_SYM(info)  ((uint32_t)((info) >> 32))
+

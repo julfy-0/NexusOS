@@ -1,4 +1,4 @@
-/* NexusOS 0.5.1 graphical desktop. */
+/* NexusOS graphical desktop — version comes from nexus_version.h. */
 #include <stdint.h>
 #include "gui.h"
 #include "font.h"
@@ -258,7 +258,7 @@ static void draw_terminal(void) {
     rect_alpha(x,y,w,32,0x302A3B,245);
     text_at("NexusOS Terminal",x+14,y+8,1,0xF4F1F8);
     text_at("ESC",x+w-38,y+8,1,0xD7D1E1);
-    text_at("NexusOS 0.5.1 Terminal",x+16,y+52,1,0xCFC8DC);
+    text_at("NexusOS " NEXUS_VERSION_STRING " Terminal",x+16,y+52,1,0xCFC8DC);
     text_at(g_term_output,x+16,y+78,1,0xEEEAF4);
     text_at("Commands: help  clear  version  uptime  desktop",x+16,y+h-64,1,0xAFA8BC);
     text_at("NexusOS> ",x+16,y+h-36,1,0xFFFFFF);
@@ -278,7 +278,7 @@ static void draw_settings(void) {
     text_at("NexusOS Settings",x+16,y+10,1,0xF4F1F8);
     text_at("ESC",x+w-40,y+10,1,0xD7D1E1);
     text_at("SYSTEM",x+20,y+58,1,0xBFAEFF);
-    const char *items[5] = {"Version   NexusOS 0.5.1 - Enstein","Display   Automatic framebuffer resolution","Input     PS/2 Keyboard and Mouse","Uptime    System runtime","About     NexusOS x86_64 / UEFI"};
+    const char *items[5] = {"Version   NexusOS " NEXUS_VERSION_DISPLAY "","Display   Automatic framebuffer resolution","Input     PS/2 Keyboard and Mouse","Uptime    System runtime","About     NexusOS x86_64 / UEFI"};
     for(int i=0;i<5;i++) {
         int iy=y+82+i*42;
         if(i==g_settings_item) rect_alpha(x+14,iy-6,w-28,32,0x5A506B,170);
@@ -328,7 +328,7 @@ static void terminal_execute(void) {
     g_term_line[g_term_len]=0;
     if (streq(g_term_line,"help")) g_term_output="help: clear version uptime desktop";
     else if (streq(g_term_line,"clear")) g_term_output="";
-    else if (streq(g_term_line,"version")) g_term_output="NexusOS 0.5.1 - Enstein";
+    else if (streq(g_term_line,"version")) g_term_output="NexusOS " NEXUS_VERSION_DISPLAY "";
     else if (streq(g_term_line,"uptime")) g_term_output="System uptime available in Desktop panel";
     else if (streq(g_term_line,"desktop")) { g_view=0; g_term_len=0; g_term_line[0]=0; gui_draw_desktop(); return; }
     else if (g_term_len) g_term_output="Unknown command. Type help";
@@ -398,7 +398,7 @@ int gui_handle_key(int key) {
         if (g_selected_app == 1) { g_view=1; g_term_len=0; g_term_line[0]=0; g_term_output="Welcome to NexusOS Terminal"; gui_draw_desktop(); return 1; }
         if (g_selected_app == 0) { g_view=3; g_files_item=0; gui_draw_desktop(); return 1; }
         else if (g_selected_app == 2) { g_view=2; g_settings_item=0; gui_draw_desktop(); return 1; }
-        else g_gui_message="Application slot reserved for NexusOS 0.5.1";
+        else g_gui_message="Application slot reserved for NexusOS " NEXUS_VERSION_STRING;
         gui_draw_desktop(); return 1;
     }
     return 1;

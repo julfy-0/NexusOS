@@ -58,6 +58,15 @@ typedef struct {
     nexus_framebuffer_t fb;
     nexus_memory_map_t mmap;
 
+    /* Kernel load contract. The kernel is linked at NEXUS_KERNEL_LINK_BASE
+     * but may be physically loaded anywhere below 4 GiB. The UEFI loader
+     * applies R_X86_64_RELATIVE relocations before ExitBootServices(). */
+    uint64_t kernel_phys_base;
+    uint64_t kernel_phys_end;
+    uint64_t kernel_image_size;
+    uint64_t kernel_link_base;
+    uint64_t kernel_entry;
+
     /* DMI/SMBIOS strings copied by the UEFI loader before ExitBootServices.
      * The kernel never dereferences firmware-owned pointers. */
     uint32_t system_info_valid;
@@ -67,6 +76,8 @@ typedef struct {
     char system_manufacturer[64];
     char system_product[96];
 } nexus_boot_info_t;
+
+#define NEXUS_KERNEL_LINK_BASE 0x200000ULL
 
 #define NEXUS_BOOT_MAGIC 0x4E4558555342494EULL /* "NEXUSBIN" */
 

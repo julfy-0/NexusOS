@@ -12,10 +12,11 @@
 
 #define NEXUS_VERSION_MAJOR    0
 #define NEXUS_VERSION_MINOR    5
-#define NEXUS_VERSION_PATCH    1
+#define NEXUS_VERSION_PATCH    3
+#define NEXUS_VERSION_REVISION 6
 #define NEXUS_VERSION_CODENAME "Enstein"
 
-#define NEXUS_VERSION_STRING "0.5.1"
-#define NEXUS_VERSION_DISPLAY "0.5.1 - Desktop Update"
+#define NEXUS_VERSION_STRING "0.5.3.6"
+#define NEXUS_VERSION_DISPLAY "0.5.3.6 - Enstein"
 
 #endif

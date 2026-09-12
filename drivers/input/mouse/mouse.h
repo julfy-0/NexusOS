@@ -10,6 +10,7 @@
  */
 void mouse_init(void);
 void mouse_handle_irq(void);
+int mouse_process_byte(uint8_t byte);
 int mouse_poll(void);
 void mouse_set_screen_size(uint32_t width, uint32_t height);
 int mouse_is_present(void);

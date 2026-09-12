@@ -10,6 +10,7 @@
 #include "mouse.h"
 #include "pit.h"
 #include "vfs.h"
+#include "nexus_version.h"
 
 static void redraw(void) { gui_draw_desktop(); }
 
@@ -58,7 +59,7 @@ int gui_input_handle_key(int key) {
         if(ctx->selected_app==0)gui_files_open();
         else if(ctx->selected_app==1)gui_terminal_open();
         else if(ctx->selected_app==2)gui_settings_open();
-        else ctx->message="Application slot reserved for NexusOS 0.5.1";
+        else ctx->message="Application slot reserved for NexusOS " NEXUS_VERSION_STRING;
         redraw(); return 1;
     }
     return 1;
