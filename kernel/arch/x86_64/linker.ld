@@ -9,6 +9,7 @@ ENTRY(_start)
 SECTIONS
 {
     . = 0x200000; /* 2 MiB — с запасом от низкой памяти и кода bootloader'а */
+    __kernel_start = .;
 
     .text : ALIGN(4096) {
         *(.text .text.*)
@@ -28,6 +29,8 @@ SECTIONS
         *(.bss .bss.*)
         __bss_end = .;
     }
+
+    __kernel_end = .;
 
     /DISCARD/ : {
         *(.comment)

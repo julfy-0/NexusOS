@@ -1,16 +1,20 @@
-# Changelog
+## Unreleased — 0.5.2.3 kernel heap
 
-## 0.5.2 — System Foundation
-
-- Added the Nexus System Core and explicit runtime states.
-- Added GPT partition discovery and multi-context FAT32 mounts.
-- Added real BOOT/SYSTEM/USERDATA GPT image generation.
-- Moved kernel loading to SYSTEM with a safe legacy BOOT fallback.
-- Added session, power, system-info, package-manager and app-manager foundations.
-- Added `.nx` package manifest format foundation without fake executable loading.
-- Preserved the existing kernel, bootloader, CLI, GUI, input, VFS, FAT32 and AHCI paths.
+- Added `kernel/mm/heap.c` and `kernel/mm/heap.h`.
+- Added 16-byte aligned `kmalloc()` / `kfree()` with first-fit allocation.
+- Heap grows lazily in a dedicated high virtual-address arena through PMM + VMM.
+- Added block splitting and adjacent free-block coalescing.
+- Added heap statistics to `meminfo`.
+- Added a boot-time allocator self-test.
 
 # CHANGELOG.md
+
+## Unreleased — neofetch refresh
+
+- Reworked `neofetch` into a larger NexusOS system dashboard with a cleaner ASCII layout and colored information labels.
+- Added runtime information for CPU, measured frequency, memory snapshot, uptime, system/DMI, system state, GPU PCI identity, framebuffer, input devices, USB controllers/ports, AHCI, NVMe, PCI count, UEFI/GOP and ACPI.
+- Added `keyboard_is_present()` so the fetch output can distinguish an initialized PS/2 keyboard from an unknown state.
+- Kept all reported values tied to existing runtime APIs; unavailable hardware information is shown as unavailable rather than guessed.
 
 ## [0.5.1] — Desktop Update
 
@@ -197,3 +201,35 @@
 - PMM: bitmap physical memory manager по Multiboot memory map
 - panic() — аварийная остановка с диагностикой
 - Инфраструктура проекта: Makefile, ADR, ROADMAP, VERSIONING, STATUS
+
+## Unreleased — PMM foundation
+
+- Added a real 4 KiB physical memory manager based on the UEFI memory map.
+- Added conservative reservation of kernel, boot, framebuffer and low memory.
+- Added physical page allocation/free APIs and memory statistics.
+- Extended `meminfo` with PMM state.
+- Added kernel linker symbols for precise kernel-image reservation.
+- Updated the active roadmap through NexusOS 0.6.0.
+
+## 0.5.2.4 — Page-Fault Diagnostics
+
+Added a dedicated x86_64 page-fault diagnostic path for exception vector 14.
+
+### Added
+
+- `kernel/mm/page_fault.c`
+- `kernel/mm/page_fault.h`
+- CR2 fault-address reporting
+- x86_64 page-fault error-code decoding
+- read/write and user/kernel access reporting
+- present/protection, reserved-bit, instruction-fetch, protection-key,
+  shadow-stack, and SGX diagnostics when reported by the CPU
+- RIP, CS, RFLAGS, CR3, and user RSP/SS reporting when applicable
+- non-recursive diagnostics that avoid walking VMM page tables from #PF
+
+### Design
+
+The handler is diagnostic-only. It does not attempt demand paging or recovery.
+A page-table walk from a page-fault handler is intentionally avoided because a
+corrupt paging hierarchy could cause a recursive fault and destroy the panic
+output. Recovery will be introduced with future process/address-space support.

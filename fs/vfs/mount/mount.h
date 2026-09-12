@@ -20,14 +20,11 @@ typedef struct {
     char target[VFS_PATH_MAX];
     char fstype[VFS_FSTYPE_MAX];
     uint32_t flags;
-    int backend; /* filesystem backend slot; -1 for namespace-only mounts */
 } vfs_mount_t;
 
 void vfs_mount_init(void);
 int vfs_mount(const char *source, const char *target,
               const char *fstype, uint32_t flags);
-int vfs_mount_backend(const char *source, const char *target,
-                      const char *fstype, uint32_t flags, int backend);
 int vfs_umount(const char *target);
 const vfs_mount_t *vfs_mount_get(int index);
 int vfs_mount_count(void);

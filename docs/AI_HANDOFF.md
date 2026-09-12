@@ -1,56 +1,47 @@
-# NexusOS AI Handoff
+# AI_HANDOFF.md — инструкция для любой нейронки, продолжающей NexusOS
 
-## Current baseline
+Этот проект specifically designed так, чтобы его можно было передавать
+между разными AI-ассистентами (Claude, GPT, Gemini, локальные модели —
+без разницы) без потери контекста. Правила ниже — обязательны, а не
+рекомендация.
 
-NexusOS is an existing x86_64 freestanding C operating system with a custom
-UEFI bootloader and monolithic kernel. Do not replace it with a demo or rewrite
-working subsystems.
+## Перед тем как писать код
 
-## Current architecture
+1. Прочитай `docs/STATUS.md` — где мы сейчас
+2. Прочитай `docs/ROADMAP.md` — куда двигаемся и в каком порядке
+3. Прочитай `docs/adr/` — какие архитектурные решения уже приняты
+   и **почему**. Не переоткрывай уже решённые споры (например
+   "монолит vs микроядро") без веской новой причины — и если меняешь
+   решение, пиши новый ADR, а не тихо переписывай код в другую сторону.
+4. Прочитай `README.md` — структура каталогов, что где лежит
 
-```text
-boot/uefi        UEFI loader
-kernel/          kernel and x86_64 architecture
- drivers/        hardware
-fs/              GPT, VFS and FAT32
-system/          high-level Nexus System services
-gui/             existing desktop implementation
-shell/           existing shell and commands
-assets/          source assets
-include/nexus/   shared contracts
-```
+## Пока пишешь код
 
-## Important invariants
+- Держись существующей структуры каталогов (`arch/`, `drivers/`,
+  `mm/`, `kernel/`, `lib/`) — не создавай параллельные "свои" папки
+- Один модуль = пара `.h`/`.c` с комментарием в шапке файла, что он
+  делает и почему (как уже сделано во всех текущих файлах)
+- Ассемблер — только там, где без него нельзя (загрузка сегментных
+  регистров, LGDT/LIDT, сохранение контекста прерывания). Всё
+  остальное — на C.
+- Не ломай уже работающие подсистемы ради новой — если нужна
+  переделка (например GDT/paging), сначала опиши это в новом ADR
 
-- `kernel.elf` remains the kernel artifact.
-- UEFI remains the boot mechanism.
-- No GRUB.
-- Kernel remains freestanding C.
-- Existing CLI, GUI, PS/2 input, VFS, FAT32 and AHCI functionality must be
-  preserved.
-- `.nx` is metadata/package infrastructure only until an executable model is
-  designed.
-- BOOT/SYSTEM/USERDATA is a real GPT layout, not three folders in one image.
+## После того как написал код
 
-## Image layout
+1. Обнови `docs/STATUS.md`:
+   - Раздел "что работает" — добавь новую галочку
+   - Раздел "следующая задача" — обнови на следующий пункт из ROADMAP
+   - Раздел "известные ограничения" — если появились новые
+2. Если версия готова (закрыт milestone из ROADMAP) — обнови номер
+   версии по правилам `docs/VERSIONING.md` и добавь запись в
+   `CHANGELOG.md`
+3. Если принял архитектурное решение (не мелкая правка, а "как это
+   должно работать концептуально") — добавь ADR в `docs/adr/`
+   по шаблону `docs/adr/0000-template.md`
 
-```text
-BOOT      64 MiB FAT32  -> /boot
-SYSTEM    64 MiB FAT32  -> /system
-USERDATA  configurable -> /userdata
-```
+## Если что-то в этом файле противоречит здравому смыслу
 
-The UEFI loader finds SYSTEM through its GPT partition type and loads
-`SYSTEM/KERNEL/KERNEL.ELF`. A fallback to the old BOOT-root `kernel.elf` exists
-for migration safety.
-
-## Build
-
-```bash
-make clean
-make
-make iso
-./build.sh
-./create-img.sh --userdata 1G
-./run.sh
-```
+Значит, автор (то есть ты, продолжающий проект) должен обновить сам
+этот файл, а не молча игнорировать правило. Процесс имеет смысл только
+если ему следуют все сессии, а не только "удобные".

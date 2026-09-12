@@ -1,94 +1,117 @@
-# NexusOS Architecture
+# ARCHITECTURE.md
 
-NexusOS 0.5.2 keeps the existing custom monolithic kernel and UEFI bootloader,
-but adds a distinct high-level **Nexus System** layer.
+## Тип ядра
 
-## Boot and runtime flow
+Монолитное (`docs/adr/0001`). Архитектура — UEFI/x86_64
+(`docs/adr/0002`, заменяет прежнюю BIOS/i386/GRUB).
 
-```text
-UEFI
-  ↓
-BOOT partition / EFI/BOOT/BOOTX64.EFI
-  ↓
-Nexus Bootloader
-  ↓
-GPT discovery of SYSTEM partition
-  ↓
-SYSTEM/KERNEL/KERNEL.ELF
-  ↓
-Nexus Kernel
-  ├── GDT / IDT / PIC / PIT
-  ├── paging / interrupts
-  ├── framebuffer / console
-  └── hardware drivers
-  ↓
-VFS + FAT32 + GPT storage discovery
-  ↓
-Nexus System
-  ├── system state
-  ├── session service
-  ├── power service
-  ├── system information
-  ├── package manager foundation
-  └── application manager
-  ↓
-CLI / Desktop
-  ↓
-Built-in applications / future .nx packages
-```
-
-## Kernel vs Nexus System
-
-The kernel remains responsible for low-level execution and hardware access.
-High-level policy belongs under `system/`.
-
-The kernel is still a freestanding ELF64 `kernel.elf`; its binary format and
-entry point are unchanged.
-
-## System states
-
-`system/core/state.*` defines:
-
-- `BOOTING`
-- `CLI`
-- `DESKTOP`
-- `APPLICATION`
-- `SHUTDOWN`
-- `REBOOT`
-
-`desktop-run` now changes the state to `DESKTOP` before starting the existing
-GUI. Leaving the desktop returns the state to `CLI`.
-
-## Storage architecture
-
-The disk image is a real GPT disk:
+## Организация дерева исходников
 
 ```text
-NexusOS.img
-├── BOOT       64 MiB   FAT32   /boot
-├── SYSTEM     64 MiB   FAT32   /system
-└── USERDATA   selected FAT32  /userdata
+boot/uefi/        UEFI loader
+kernel/core/      kernel orchestration, state, panic, usermode foundation
+kernel/arch/      x86_64 entry/GDT/IDT/ISR/linker
+kernel/mm/        paging
+ drivers/         hardware/input/storage/graphics/timer/USB
+fs/vfs/           VFS core, mounts, filesystem registry
+fs/fat32/         FAT32 implementation
+gui/              GUI core + renderer/font boundary
+shell/            shell core + categorized commands
+lib/memory/       freestanding memory primitives
+assets/           wallpapers and fonts
+include/nexus/    shared headers
+platform/target/  hardware detection
 ```
 
-The bootloader uses UEFI Block I/O + Simple File System protocols to locate the
-private NexusOS SYSTEM partition type and loads `\kernel\kernel.elf` from it.
-For old pre-0.5.2 images it retains a compatibility fallback to
-`\kernel.elf` on the boot volume.
+The directory boundaries are organizational boundaries only. The current
+kernel remains monolithic and all linked kernel-side C modules execute in
+kernel context.
 
-After `ExitBootServices`, the kernel discovers the GPT through the existing
-AHCI block driver and mounts the FAT32 partitions through the existing VFS.
-The FAT32 driver now supports multiple independent read-only contexts instead
-of a single global filesystem instance.
+## Поток загрузки
 
-## Package architecture
+```
+UEFI Firmware
+  → boot/uefi/boot.c: efi_main(ImageHandle, SystemTable)
+      1. GOP (Graphics Output Protocol) — получаем framebuffer
+      2. открываем том, с которого загрузились, читаем \kernel.elf
+      3. парсим ELF64 (boot/uefi/elf.h), раскладываем PT_LOAD-сегменты
+         по их физическим адресам (AllocatePages(AllocateAddress, ...))
+      4. финальный GetMemoryMap(), ExitBootServices()
+      5. прыгаем на entry point ядра с nexus_boot_info_t* в RDI
+         (System V ABI — обычное соглашение GCC, а не MS x64 ABI,
+         которым живёт сам бутлоадер, — граница ABI ровно на этом прыжке)
+  → kernel/arch/x86_64/entry.S: _start
+      свой стек (64 KiB), call kmain (rdi уже на месте)
+  → kernel/core/kernel.c: kmain(nexus_boot_info_t *boot_info)
+      console_init() → gdt_init() → idt_init() → pic_remap() →
+      pit_init(100) → keyboard_init() → размаскировать IRQ0/IRQ1 →
+      ahci_init()+fat32_mount() (если диск есть) → shell_init() → sti
+```
 
-`.nx` is a package container/representation, not a new executable format.
-The current package layer only provides:
+Два разных ABI в одном проекте — это не случайность, а следствие
+того, что UEFI исторически MS-совместимая среда (PE32+, MS x64 ABI:
+red zone запрещён по другой причине, calling convention другой), а
+ядро — обычный SysV ABI, как весь остальной Linux-мир. Граница между
+ними ровно в месте прыжка `kernel_entry(&boot_info)` в конце
+`boot/uefi/boot.c` — после этого момента бутлоадер больше не
+исполняется, ABI-конфликта в runtime нет.
 
-- package path recognition
-- manifest parsing
-- package discovery boundary
-- application registration boundary
+## Прерывания
 
-No network downloader, App Store, arbitrary binary execution, or archive parser
-has been added.
+IDT на 48 векторов: 0-31 исключения CPU, 32-47 — IRQ0-15 после PIC
+remap (`drivers/hardware/pic/pic.c`). Общий ассемблерный стаб
+(`kernel/arch/x86_64/isr.S`) сохраняет регистры в `interrupt_frame_t`
+(layout зафиксирован в `kernel/arch/x86_64/idt.h` — при изменении стаба
+менять оба места синхронно) и зовёт единый C-обработчик
+`isr_handler()` (`kernel/arch/x86_64/idt.c`), который либо паникует
+(vector < 32), либо диспетчеризует по номеру (32 = таймер,
+33 = клавиатура), либо просто шлёт EOI.
+
+Это отличается от типичного паттерна "таблица callback'ов,
+регистрируемая динамически" (как было в прежней BIOS-версии) — здесь
+диспетчеризация зашита прямо в `isr_handler()` через `if`. Для
+текущего набора устройств (2 IRQ) это осознанно проще; если устройств
+станет больше — рассмотреть переход на таблицу, но это не сделано
+заранее ("не оптимизируй то, что не болит").
+
+## Память
+
+**Свои page tables** (`kernel/mm/paging.c`, `docs/adr/0003`) — с Milestone 0.4
+ядро больше не полагается на таблицы, оставленные UEFI firmware.
+Схема пока та же по смыслу — identity map (виртуальный адрес ==
+физический), 2 MiB страницы (PS-бит в PD, без PT). Покрытие строится
+в три слоя: безусловно первые 4 GiB, затем каждый регион из настоящей
+EFI memory map (включая MMIO/reserved), затем framebuffer явно (он не
+гарантированно попадает в memory map тем же адресом). `paging_init()`
+вызывается из `kmain()` сразу после `idt_init()` — так page fault во
+время самой настройки паджинга хотя бы красиво диагностируется
+(vector 14, CR2 + расшифровка error code в `kernel/arch/x86_64/idt.c`), а не
+уходит в тройной fault.
+
+`nexus_boot_info_t` несёт полную EFI memory map (`kstate_mem_summary()`
+умеет её просуммировать; шелл-команда `meminfo` показывает и paging-,
+и memory-map-статус), но из этого пока не построен настоящий allocator
+— `kmalloc`/`kfree` это следующий шаг Milestone "memoria"
+(`docs/ROADMAP.md`). Higher-half kernel и разделение прав страниц
+(`.text` read+exec, `.rodata` read-only — сейчас всё read+write) тоже
+ещё не сделаны, см. `docs/adr/0003` "Последствия".
+
+## Драйверы и связи между модулями
+
+`drivers/input/keyboard/keyboard.c` напрямую зовёт `shell_input_char()` —
+то есть драйвер клавиатуры знает о существовании шелла. Это отличается
+от принципа "драйвер ничего не знает о том, кто его использует" из
+`docs/adr/0001` — но так было в исходном перенесённом проекте, и
+переписывать это заодно с переносом было бы смешиванием двух разных
+задач в одном шаге. Разрыв этой связи (через очередь событий) — явный
+пункт в `docs/ROADMAP.md` (Milestone "threadwork"), не забыт, просто
+отложен.
+
+## Шелл и команды
+
+`shell/shell.c` + `shell/apps/*.c` — почти 50 команд,
+каждая как отдельная пара `.c`/`.h`. Все они выполняются **в контексте
+прерывания клавиатуры**, синхронно, в кольце 0 — не как процессы.
+Команда должна быть быстрой и не блокирующей (см. комментарий в шапке
+`shell.c`). Это временно: Milestone "descent" должен вынести шелл в
+user-space процесс без переписывания логики команд с нуля.

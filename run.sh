@@ -1,116 +1,139 @@
 #!/usr/bin/env bash
-# NexusOS — run.sh
-# Запускает NexusOS в QEMU (OVMF UEFI, x86_64).
-# Если build/fat.img отсутствует — сначала запускает create-img.sh.
-#
-# Использование:
-#   ./run.sh                # полноэкранный режим (по умолчанию)
-#   ./run.sh --window       # оконный режим
-#   ./run.sh --no-kvm       # без KVM (для ВМ внутри ВМ)
-#   ./run.sh --mem 512      # объём RAM в МБ (default: 256)
-#   ./run.sh --img my.img   # другой образ диска
-#   ./run.sh --rebuild      # пересобрать образ перед запуском
-#   ./run.sh --help
+# NexusOS QEMU launcher
+# Boots the existing NexusOS UEFI image without changing OS sources.
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-RESET='\033[0m'; BOLD='\033[1m'; CYAN='\033[36m'
-GREEN='\033[32m'; RED='\033[31m'; YELLOW='\033[33m'; GRAY='\033[90m'
-[[ -t 1 ]] || { RESET=''; BOLD=''; CYAN=''; GREEN=''; RED=''; YELLOW=''; GRAY=''; }
-
-die()  { printf '%s%sERROR:%s %s\n' "$BOLD" "$RED" "$RESET" "$*" >&2; exit 1; }
-info() { printf '%s=>%s %s\n' "$CYAN" "$RESET" "$*"; }
-ok()   { printf '%s✓%s  %s\n' "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s!%s  %s\n' "$YELLOW" "$RESET" "$*"; }
-
-# --- defaults ---
-FULLSCREEN=1
-USE_KVM=1
+DISK_IMG="build/fat.img"
 MEM_MB=256
-DISK_IMG="NexusOS.img"
+USE_KVM=1
 REBUILD=0
+FULLSCREEN=1
+
+RED=$'\033[31m'; GREEN=$'\033[32m'; CYAN=$'\033[36m'; YELLOW=$'\033[33m'; BOLD=$'\033[1m'; RESET=$'\033[0m'; GRAY=$'\033[90m'
+if [[ ! -t 1 ]]; then RED=''; GREEN=''; CYAN=''; YELLOW=''; BOLD=''; RESET=''; GRAY=''; fi
+
+die() { printf '%s%sERROR:%s %s\n' "$BOLD" "$RED" "$RESET" "$*" >&2; exit 1; }
+info() { printf '%s=>%s %s\n' "$CYAN" "$RESET" "$*"; }
+ok() { printf '%s✓%s %s\n' "$GREEN" "$RESET" "$*"; }
+warn() { printf '%s!%s %s\n' "$YELLOW" "$RESET" "$*"; }
 
 usage() {
-    printf 'Usage: %s [options]\n\n' "$(basename "$0")"
-    printf 'Options:\n'
-    printf '  --window        run in a window instead of fullscreen\n'
-    printf '  --no-kvm        disable KVM acceleration\n'
-    printf '  --mem   MB      RAM in MiB (default: %d)\n' "$MEM_MB"
-    printf '  --img   PATH    disk image to boot (default: %s)\n' "$DISK_IMG"
-    printf '  --rebuild       recreate the GPT disk image before booting
-  NEXUS_USERDATA_SIZE=2G ./run.sh  # default image USERDATA size override\n'
-    printf '  --help          show this help\n'
-    exit 0
+    cat <<USAGE
+NexusOS QEMU launcher
+
+Usage: ./run.sh [options]
+
+Options:
+  --rebuild       recreate NexusOS.img before booting
+  --no-kvm        disable KVM acceleration
+  --mem MB        guest RAM in MiB (default: $MEM_MB)
+  --img PATH      disk image path (default: $DISK_IMG)
+  --window        use a window instead of fullscreen
+  --help          show this help
+
+Environment:
+  OVMF_CODE=PATH  use a specific OVMF_CODE firmware file
+  OVMF_VARS=PATH  use a specific writable OVMF variables file
+USAGE
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --window)   FULLSCREEN=0; shift ;;
-        --no-kvm)   USE_KVM=0;    shift ;;
-        --mem)      [[ -n "${2:-}" ]] || die "--mem requires a value"; MEM_MB="$2"; shift 2 ;;
-        --img)      [[ -n "${2:-}" ]] || die "--img requires a value"; DISK_IMG="$2"; shift 2 ;;
-        --rebuild)  REBUILD=1; shift ;;
-        --help|-h)  usage ;;
+        --rebuild) REBUILD=1; shift ;;
+        --no-kvm) USE_KVM=0; shift ;;
+        --mem)
+            [[ $# -ge 2 ]] || die '--mem requires a value'
+            MEM_MB="$2"
+            shift 2
+            ;;
+        --img)
+            [[ $# -ge 2 ]] || die '--img requires a path'
+            DISK_IMG="$2"
+            shift 2
+            ;;
+        --window) FULLSCREEN=0; shift ;;
+        --help|-h) usage; exit 0 ;;
         *) die "Unknown option: $1" ;;
     esac
 done
 
-[[ "$MEM_MB" =~ ^[0-9]+$ && "$MEM_MB" -ge 64 ]] \
-    || die "Memory must be ≥ 64 MiB (got: $MEM_MB)"
+[[ "$MEM_MB" =~ ^[0-9]+$ && "$MEM_MB" -ge 64 ]] || die "RAM must be at least 64 MiB (got: $MEM_MB)"
+command -v qemu-system-x86_64 >/dev/null 2>&1 || die 'qemu-system-x86_64 not found (install qemu-system-x86)'
 
-printf '%s%sNexusOS Launcher%s\n\n' "$BOLD" "$CYAN" "$RESET"
+find_first_file() {
+    local candidate
+    for candidate in "$@"; do
+        if [[ -f "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
 
-# --- зависимости ---
-command -v qemu-system-x86_64 &>/dev/null \
-    || die "qemu-system-x86_64 not found  (sudo apt install qemu-system-x86)"
+# -----------------------------------------------------------------------------
+# OVMF discovery
+# -----------------------------------------------------------------------------
 
-# --- OVMF: ищем несколько стандартных путей ---
-OVMF_CODE=""
-for p in \
-    /usr/share/OVMF/OVMF_CODE_4M.fd \
-    /usr/share/OVMF/OVMF_CODE.fd \
-    /usr/share/edk2/ovmf/OVMF_CODE.fd \
-    /usr/share/edk2-ovmf/OVMF_CODE.fd \
-    /usr/share/qemu/OVMF.fd
-do
-    [[ -f "$p" ]] && { OVMF_CODE="$p"; break; }
-done
-[[ -n "$OVMF_CODE" ]] || die "OVMF firmware not found  (sudo apt install ovmf)"
+OVMF_CODE="${OVMF_CODE:-}"
+if [[ -z "$OVMF_CODE" ]]; then
+    OVMF_CODE="$(find_first_file \
+        /usr/share/OVMF/OVMF_CODE_4M.fd \
+        /usr/share/OVMF/OVMF_CODE.fd \
+        /usr/share/edk2/ovmf/OVMF_CODE.fd \
+        /usr/share/edk2-ovmf/OVMF_CODE.fd \
+        /usr/share/edk2-ovmf/x64/OVMF_CODE.fd \
+        /usr/share/qemu/OVMF.fd \
+        "$ROOT_DIR/OVMF_CODE.fd" 2>/dev/null || true)"
+fi
 
-# OVMF_VARS: локальная копия (QEMU пишет туда переменные EFI)
-OVMF_VARS="./OVMF_VARS.fd"
+# Last-resort discovery for distro-specific OVMF locations.
+if [[ -z "$OVMF_CODE" ]]; then
+    OVMF_CODE="$(find /usr/share -type f \( \
+        -name 'OVMF_CODE_4M.fd' -o \
+        -name 'OVMF_CODE.fd' \
+    \) -print -quit 2>/dev/null || true)"
+fi
+
+[[ -n "$OVMF_CODE" ]] || die 'OVMF_CODE firmware not found (install ovmf or set OVMF_CODE=...)'
+[[ -r "$OVMF_CODE" ]] || die "OVMF firmware is not readable: $OVMF_CODE"
+
+OVMF_VARS="${OVMF_VARS:-$ROOT_DIR/OVMF_VARS.fd}"
 if [[ ! -f "$OVMF_VARS" ]]; then
-    VARS_TEMPLATE=""
-    for p in \
+    VARS_TEMPLATE="$(find_first_file \
         /usr/share/OVMF/OVMF_VARS_4M.fd \
         /usr/share/OVMF/OVMF_VARS.fd \
         /usr/share/edk2/ovmf/OVMF_VARS.fd \
-        /usr/share/edk2-ovmf/OVMF_VARS.fd
-    do
-        [[ -f "$p" ]] && { VARS_TEMPLATE="$p"; break; }
-    done
-    if [[ -n "$VARS_TEMPLATE" ]]; then
-        cp "$VARS_TEMPLATE" "$OVMF_VARS"
-        ok "Copied OVMF_VARS from $VARS_TEMPLATE"
-    else
-        warn "OVMF_VARS template not found — EFI variables won't persist"
-        OVMF_VARS=""
-    fi
+        /usr/share/edk2-ovmf/OVMF_VARS.fd \
+        /usr/share/edk2-ovmf/x64/OVMF_VARS.fd \
+        2>/dev/null || true)"
+    [[ -n "$VARS_TEMPLATE" ]] || die 'OVMF_VARS template not found; install ovmf'
+    mkdir -p "$(dirname "$OVMF_VARS")"
+    cp "$VARS_TEMPLATE" "$OVMF_VARS"
+    ok "Created OVMF variables file: $OVMF_VARS"
 fi
 
-# --- образ диска ---
+# -----------------------------------------------------------------------------
+# Build / image preparation
+# -----------------------------------------------------------------------------
+
 if [[ "$REBUILD" -eq 1 || ! -f "$DISK_IMG" ]]; then
     if [[ "$REBUILD" -eq 1 ]]; then
         info "Rebuilding disk image (--rebuild)"
     else
         warn "Disk image not found: $DISK_IMG — creating it now"
     fi
-    bash create-img.sh --userdata "${NEXUS_USERDATA_SIZE:-1G}" --out "$DISK_IMG" \
+    bash create-img.sh --out "$DISK_IMG" \
         || die "create-img.sh failed"
 fi
+
+[[ -s "$DISK_IMG" ]] || die "Disk image is missing or empty: $DISK_IMG"
+[[ -s build/BOOTX64.EFI ]] || die 'build/BOOTX64.EFI is missing; run ./build.sh'
+[[ -s build/kernel.elf ]] || die 'build/kernel.elf is missing; run ./build.sh'
 
 ok "Disk image: $DISK_IMG"
 ok "OVMF:       $OVMF_CODE"
@@ -128,22 +151,65 @@ if [[ "$USE_KVM" -eq 1 ]]; then
 fi
 [[ "$USE_KVM" -eq 0 ]] && KVM_FLAGS=(-cpu qemu64)
 
-# --- display ---
+# --- launch UI / design -------------------------------------------------------
+# This section only changes the launcher presentation. The actual QEMU command
+# below intentionally remains the classic NexusOS command line.
+if [[ -t 1 ]]; then
+    CLEAR=$'\033[2J\033[H'
+    DIM=$'\033[2m'
+    WHITE=$'\033[97m'
+    BLUE=$'\033[94m'
+    MAGENTA=$'\033[95m'
+    GREEN=$'\033[92m'
+    YELLOW=$'\033[93m'
+    RED=$'\033[91m'
+    RESET=$'\033[0m'
+else
+    CLEAR=''; DIM=''; WHITE=''; BLUE=''; MAGENTA=''; GREEN=''; YELLOW=''; RED=''; RESET=''
+fi
+
+printf '%s' "$CLEAR"
+printf '\n'
+printf '%s╔══════════════════════════════════════════════════════════════╗%s\n' "$BLUE$WHITE" "$RESET"
+printf '%s║%s                     %sN E X U S O S%s                    %s║%s\n' "$BLUE" "$RESET" "$MAGENTA$BOLD" "$RESET" "$BLUE" "$RESET"
+printf '%s║%s                  QEMU SYSTEM LAUNCHER                  %s║%s\n' "$BLUE" "$DIM" "$BLUE" "$RESET"
+printf '%s╠══════════════════════════════════════════════════════════════╣%s\n' "$BLUE" "$RESET"
+printf '%s║%s  %-14s %s %-37s %s║%s\n' "$BLUE" "$RESET" 'IMAGE' ':' "$DISK_IMG" "$BLUE" "$RESET"
+printf '%s║%s  %-14s %s %-37s %s║%s\n' "$BLUE" "$RESET" 'MEMORY' ':' "${MEM_MB} MiB" "$BLUE" "$RESET"
+printf '%s║%s  %-14s %s %-37s %s║%s\n' "$BLUE" "$RESET" 'FIRMWARE' ':' 'UEFI / OVMF' "$BLUE" "$RESET"
+if [[ "$USE_KVM" -eq 1 ]]; then
+    ACCEL_TEXT='KVM / hardware acceleration'
+else
+    ACCEL_TEXT='TCG / software acceleration'
+fi
+printf '%s║%s  %-14s %s %-37s %s║%s\n' "$BLUE" "$RESET" 'ACCELERATION' ':' "$ACCEL_TEXT" "$BLUE" "$RESET"
+if [[ "$FULLSCREEN" -eq 1 ]]; then
+    MODE_TEXT='Fullscreen / GTK OpenGL'
+else
+    MODE_TEXT='Windowed / GTK OpenGL'
+fi
+printf '%s║%s  %-14s %s %-37s %s║%s\n' "$BLUE" "$RESET" 'DISPLAY' ':' "$MODE_TEXT" "$BLUE" "$RESET"
+printf '%s╠══════════════════════════════════════════════════════════════╣%s\n' "$BLUE" "$RESET"
+printf '%s║%s              %s✓ SYSTEM READY — STARTING...%s              %s║%s\n' "$BLUE" "$RESET" "$GREEN$BOLD" "$RESET" "$BLUE" "$RESET"
+printf '%s╚══════════════════════════════════════════════════════════════╝%s\n' "$BLUE" "$RESET"
+printf '\n%s%sLaunching NexusOS...%s\n' "$BOLD" "$CYAN" "$RESET"
+printf '%s%sKeyboard: USB%s    %sMouse: USB tablet%s\n' "$DIM" "$RESET" "$RESET" "$DIM" "$RESET"
+printf '%s%sQEMU window will appear now.%s\n\n' "$DIM" "$RESET" "$RESET"
+
+# Classic NexusOS display flags, unchanged from the pre-rollback launcher.
 DISPLAY_FLAGS=()
 if [[ "$FULLSCREEN" -eq 1 ]]; then
     DISPLAY_FLAGS=(-full-screen -display gtk,gl=on)
-    info "Display: fullscreen (press Ctrl+Alt+F to toggle)"
 else
     DISPLAY_FLAGS=(-display gtk,gl=on)
-    info "Display: windowed"
 fi
 
-# --- OVMF_VARS drive (опционально) ---
+# --- OVMF_VARS drive (optional) ---
 VARS_DRIVE=()
-[[ -n "$OVMF_VARS" ]] && VARS_DRIVE=(-drive "if=pflash,format=raw,file=${OVMF_VARS}")
+[[ -n "$OVMF_VARS" && -f "$OVMF_VARS" ]] && VARS_DRIVE=(-drive "if=pflash,format=raw,file=${OVMF_VARS}")
 
-printf '\n%s%sStarting QEMU...%s\n\n' "$BOLD" "$CYAN" "$RESET"
-
+# IMPORTANT: keep the classic QEMU invocation. Only the launcher UI above was
+# redesigned; boot/device behavior is intentionally untouched.
 exec qemu-system-x86_64 \
     -drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}" \
     "${VARS_DRIVE[@]}" \

@@ -1,196 +1,204 @@
-/* NexusOS: минимальный PS/2 keyboard driver, scancode set 1, US QWERTY.
- * Достаточно для интерактивной демонстрации — печатаем то, что набрали. */
+/* NexusOS PS/2 keyboard driver — i8042, translated Set-1 scancodes.
+ *
+ * Handles modifier state, Caps/Num/Scroll Lock LEDs, E0 extended keys and
+ * normal ASCII input. The public shell/GUI API remains unchanged so the
+ * input driver can be upgraded without rewriting the desktop.
+ */
 #include "keyboard.h"
 #include "shell.h"
 #include "gui.h"
 #include "console.h"
-#include "pic.h"
 #include "io.h"
 
 #define KBD_DATA_PORT    0x60
 #define KBD_STATUS_PORT  0x64
 #define KBD_CMD_PORT     0x64
+#define KBD_STATUS_OBF   (1u << 0)
+#define KBD_STATUS_IBF   (1u << 1)
 
-#define KBD_STATUS_OBF (1 << 0) /* output buffer full — есть байт для чтения */
-#define KBD_STATUS_IBF (1 << 1) /* input buffer full — контроллер занят, писать нельзя */
+#define SC_LSHIFT        0x2A
+#define SC_RSHIFT        0x36
+#define SC_LCTRL         0x1D
+#define SC_LALT          0x38
+#define SC_CAPS          0x3A
+#define SC_NUM           0x45
+#define SC_SCROLL         0x46
+#define SC_EXTENDED      0xE0
+#define SC_RELEASE       0x80
 
-#define SC_LSHIFT 0x2A
-#define SC_RSHIFT 0x36
-#define SC_RELEASE_BIT 0x80
+static volatile int g_shift;
+static volatile int g_ctrl;
+static volatile int g_alt;
+static volatile int g_caps;
+static volatile int g_num;
+static volatile int g_scroll;
+static volatile int g_present;
+static uint8_t g_extended;
 
-/* PgUp/PgDn (как и стрелки, Home/End и т.п.) — "extended" клавиши в
- * scancode set 1: контроллер шлёт их как ДВА байта, 0xE0 + собственно
- * код, а не один байт как у обычных клавиш. Наша таблица scancode_ascii[]
- * это не покрывает вообще (она рассчитана на однобайтовые make-коды),
- * поэтому раньше 0xE0 и следующий за ним байт просто терялись/трактовались
- * как непонятный код. */
-#define SC_EXTENDED_PREFIX 0xE0
-#define SC_PAGE_UP   0x49
-#define SC_PAGE_DOWN 0x51
-#define SC_ARROW_UP   0x48
-#define SC_ARROW_DOWN 0x50
-
-static int shift_down = 0;
-static int extended_prefix = 0; /* только что пришёл 0xE0, следующий байт — extended-код */
-
-/* Индекс — scancode (make code), значение — ASCII без Shift. 0 = игнорируем. */
 static const char scancode_ascii[128] = {
-    0,   27,  '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b', '\t',
-    'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n', 0,   'a', 's',
-    'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`', 0,   '\\','z', 'x', 'c', 'v',
-    'b', 'n', 'm', ',', '.', '/', 0,   '*', 0,   ' ', 0,   0,   0,   0,   0,   0,
-    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+    0,27,'1','2','3','4','5','6','7','8','9','0','-','=','\b','\t',
+    'q','w','e','r','t','y','u','i','o','p','[',']','\n',0,'a','s',
+    'd','f','g','h','j','k','l',';','\'','`',0,'\\','z','x','c','v',
+    'b','n','m',',','.','/',0,'*',0,' ',0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 };
 
-static const char scancode_ascii_shift[128] = {
-    0,   27,  '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '\b', '\t',
-    'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}', '\n', 0,   'A', 'S',
-    'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~', 0,   '|','Z', 'X', 'C', 'V',
-    'B', 'N', 'M', '<', '>', '?', 0,   '*', 0,   ' ', 0,   0,   0,   0,   0,   0,
-    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
-    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+static const char scancode_shift[128] = {
+    0,27,'!','@','#','$','%','^','&','*','(',')','_','+','\b','\t',
+    'Q','W','E','R','T','Y','U','I','O','P','{','}','\n',0,'A','S',
+    'D','F','G','H','J','K','L',':','"','~',0,'|','Z','X','C','V',
+    'B','N','M','<','>','?',0,'*',0,' ',0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 };
 
 static void wait_input_clear(void) {
-    /* Ждём, пока контроллер освободится, прежде чем писать команду/данные
-     * в 0x64/0x60 — иначе можно "потерять" собственную же команду. */
-    for (int i = 0; i < 100000; i++) {
+    for (uint32_t i = 0; i < 100000; ++i)
         if (!(inb(KBD_STATUS_PORT) & KBD_STATUS_IBF)) return;
-    }
 }
 
-static void wait_output_full(void) {
-    for (int i = 0; i < 100000; i++) {
-        if (inb(KBD_STATUS_PORT) & KBD_STATUS_OBF) return;
+static int wait_output_full(uint8_t *value) {
+    for (uint32_t i = 0; i < 100000; ++i) {
+        if (inb(KBD_STATUS_PORT) & KBD_STATUS_OBF) {
+            *value = inb(KBD_DATA_PORT);
+            return 1;
+        }
     }
+    return 0;
 }
 
 static void flush_output_buffer(void) {
-    /* Вычитываем и выбрасываем всё, что контроллер успел накопить до нас
-     * (например, ещё во время работы прошивки) — иначе первые нажатия
-     * могут потеряться или прийти как мусор вперемешку со старыми байтами. */
-    for (int i = 0; i < 32; i++) {
+    for (int i = 0; i < 32; ++i) {
         if (!(inb(KBD_STATUS_PORT) & KBD_STATUS_OBF)) break;
         (void)inb(KBD_DATA_PORT);
     }
 }
 
+static int keyboard_send(uint8_t command) {
+    for (int retry = 0; retry < 3; ++retry) {
+        wait_input_clear();
+        outb(KBD_DATA_PORT, command);
+        uint8_t reply = 0;
+        if (!wait_output_full(&reply)) return 0;
+        if (reply == 0xFA) return 1; /* ACK */
+        if (reply != 0xFE) return 0; /* not RESEND */
+    }
+    return 0;
+}
+
+static void keyboard_set_leds(void) {
+    uint8_t leds = (uint8_t)((g_scroll ? 1u : 0u) |
+                             (g_num ? 2u : 0u) |
+                             (g_caps ? 4u : 0u));
+    if (!keyboard_send(0xED)) return;
+    (void)keyboard_send(leds);
+}
+
 void keyboard_init(void) {
-    /* 1. Выключаем оба PS/2-порта на время настройки. */
-    wait_input_clear();
-    outb(KBD_CMD_PORT, 0xAD); /* disable first PS/2 port (клавиатура) */
-    wait_input_clear();
-    outb(KBD_CMD_PORT, 0xA7); /* disable second PS/2 port (мышь, если есть) */
+    g_present = 0;
+    g_shift = g_ctrl = g_alt = 0;
+    g_caps = g_num = g_scroll = 0;
+    g_extended = 0;
 
+    wait_input_clear(); outb(KBD_CMD_PORT, 0xAD); /* disable keyboard */
+    wait_input_clear(); outb(KBD_CMD_PORT, 0xA7); /* disable mouse */
     flush_output_buffer();
 
-    /* 2. Читаем configuration byte контроллера и правим нужные биты:
-     *    - бит0 (IRQ1 включён) = 1
-     *    - бит1 (IRQ12 для мыши) = 0, мышь не используем
-     *    - бит4 (clock первого порта отключён) = 0, т.е. порт активен
-     *      (да, тут инвертированная логика — 0 значит "включено")
-     *    - бит6 (трансляция scan code set 2 -> set 1) = 1 — без этого
-     *      наша таблица scancode_ascii[] (которая ждёт set 1) может
-     *      получать не те коды на контроллерах с другими настройками
-     *      по умолчанию. */
-    wait_input_clear();
-    outb(KBD_CMD_PORT, 0x20); /* read controller configuration byte */
-    wait_output_full();
-    uint8_t config = inb(KBD_DATA_PORT);
+    wait_input_clear(); outb(KBD_CMD_PORT, 0x20); /* read config */
+    uint8_t config = 0;
+    if (!wait_output_full(&config)) return;
 
-    config |= (1 << 0);
-    config &= (uint8_t)~(1 << 1);
-    config &= (uint8_t)~(1 << 4);
-    config |= (1 << 6);
+    config |= 1u;                  /* IRQ1 */
+    config &= (uint8_t)~(1u << 1);/* IRQ12 disabled until mouse init */
+    config &= (uint8_t)~(1u << 4);/* keyboard clock enabled */
+    config |= (1u << 6);           /* translate Set-2 -> Set-1 */
 
-    wait_input_clear();
-    outb(KBD_CMD_PORT, 0x60); /* write controller configuration byte */
-    wait_input_clear();
-    outb(KBD_DATA_PORT, config);
+    wait_input_clear(); outb(KBD_CMD_PORT, 0x60);
+    wait_input_clear(); outb(KBD_DATA_PORT, config);
 
-    /* 3. Снова включаем порт клавиатуры. */
-    wait_input_clear();
-    outb(KBD_CMD_PORT, 0xAE); /* enable first PS/2 port */
-
-    /* 4. На случай, если сама клавиатура была выключена — явно просим её
-     *    начать сканирование. ACK (0xFA) не проверяем строго: часть
-     *    контроллеров может не ответить вовремя, и это не повод считать
-     *    инициализацию проваленной. */
+    wait_input_clear(); outb(KBD_CMD_PORT, 0xAE); /* enable keyboard */
     flush_output_buffer();
-    wait_input_clear();
-    outb(KBD_DATA_PORT, 0xF4); /* enable scanning */
-    wait_output_full();
-    (void)inb(KBD_DATA_PORT);
 
+    /* Enable scanning. */
+    if (!keyboard_send(0xF4)) return;
+    keyboard_set_leds();
     flush_output_buffer();
+    g_present = 1;
+}
+
+static void dispatch_special(uint8_t sc, int released) {
+    if (released) return;
+    if (!gui_is_active()) {
+        if (sc == 0x49) console_scroll(1);       /* PgUp */
+        else if (sc == 0x51) console_scroll(-1);/* PgDn */
+        else if (sc == 0x48) shell_history_prev();
+        else if (sc == 0x50) shell_history_next();
+        return;
+    }
+
+    if (sc == 0x48) (void)gui_handle_key(GUI_KEY_UP);
+    else if (sc == 0x50) (void)gui_handle_key(GUI_KEY_DOWN);
+    else if (sc == 0x4B) (void)gui_handle_key(GUI_KEY_LEFT);
+    else if (sc == 0x4D) (void)gui_handle_key(GUI_KEY_RIGHT);
 }
 
 void keyboard_handle_irq(void) {
-    if (!(inb(KBD_STATUS_PORT) & KBD_STATUS_OBF)) {
-        return; /* прерывание пришло, а данных нет — не читаем "в никуда" */
-    }
-
+    if (!(inb(KBD_STATUS_PORT) & KBD_STATUS_OBF)) return;
     uint8_t sc = inb(KBD_DATA_PORT);
 
-    if (sc == SC_EXTENDED_PREFIX) {
-        extended_prefix = 1;
-        return; /* сам префикс не клавиша, а флаг "следующий байт — extended" */
-    }
-
-    if (extended_prefix) {
-        extended_prefix = 0;
-
-        if (gui_is_active()) {
-            if (sc == SC_ARROW_UP) {
-                (void)gui_handle_key(GUI_KEY_UP);
-            } else if (sc == SC_ARROW_DOWN) {
-                (void)gui_handle_key(GUI_KEY_DOWN);
-            } else if (sc == 0x4B) {
-                (void)gui_handle_key(GUI_KEY_LEFT);
-            } else if (sc == 0x4D) {
-                (void)gui_handle_key(GUI_KEY_RIGHT);
-            }
-            return;
-        }
-
-        if (sc == SC_PAGE_UP) {
-            console_scroll(1);
-        } else if (sc == SC_PAGE_DOWN) {
-            console_scroll(-1);
-        } else if (sc == SC_ARROW_UP) {
-            shell_history_prev();
-        } else if (sc == SC_ARROW_DOWN) {
-            shell_history_next();
-        }
+    if (sc == SC_EXTENDED) {
+        g_extended = 1;
         return;
     }
 
-    if (sc == SC_LSHIFT || sc == SC_RSHIFT) {
-        shift_down = 1;
-        return;
-    }
-    if (sc == (SC_LSHIFT | SC_RELEASE_BIT) || sc == (SC_RSHIFT | SC_RELEASE_BIT)) {
-        shift_down = 0;
-        return;
-    }
-    if (sc & SC_RELEASE_BIT) {
-        return; /* нас интересуют только нажатия, не отпускания */
-    }
-    if (sc >= 128) {
+    int released = (sc & SC_RELEASE) != 0;
+    sc &= 0x7F;
+
+    if (g_extended) {
+        g_extended = 0;
+        /* Right Ctrl / Right Alt use E0 prefix. */
+        if (sc == SC_LCTRL) { g_ctrl = !released; return; }
+        if (sc == SC_LALT)  { g_alt = !released; return; }
+        dispatch_special(sc, released);
         return;
     }
 
-    char c = shift_down ? scancode_ascii_shift[sc] : scancode_ascii[sc];
-    if (c != 0) {
-        int was_gui = gui_is_active();
-        if (was_gui) {
-            (void)gui_handle_key(c);
-            if (was_gui && !gui_is_active()) {
-                shell_return_from_desktop();
-            }
-        } else {
-            shell_input_char(c);
-        }
+    if (sc == SC_LSHIFT || sc == SC_RSHIFT) { g_shift = !released; return; }
+    if (sc == SC_LCTRL) { g_ctrl = !released; return; }
+    if (sc == SC_LALT)  { g_alt = !released; return; }
+
+    if (sc == SC_CAPS && !released) { g_caps = !g_caps; keyboard_set_leds(); return; }
+    if (sc == SC_NUM && !released)  { g_num = !g_num; keyboard_set_leds(); return; }
+    if (sc == SC_SCROLL && !released) { g_scroll = !g_scroll; keyboard_set_leds(); return; }
+
+    if (released || sc >= 128) return;
+
+    char c = 0;
+    if (sc < 128) {
+        int alpha = (sc >= 0x10 && sc <= 0x19) ||
+                    (sc >= 0x1E && sc <= 0x26) ||
+                    (sc >= 0x2C && sc <= 0x32);
+        if (alpha && g_caps)
+            c = g_shift ? scancode_ascii[sc] : scancode_shift[sc];
+        else
+            c = g_shift ? scancode_shift[sc] : scancode_ascii[sc];
+    }
+
+    if (c == 0) return;
+
+    int was_gui = gui_is_active();
+    if (was_gui) {
+        (void)gui_handle_key(c);
+        if (was_gui && !gui_is_active()) shell_return_from_desktop();
+    } else {
+        shell_input_char(c);
     }
 }
+
+int keyboard_is_present(void) { return g_present != 0; }
+
+int keyboard_shift_down(void) { return g_shift != 0; }
+int keyboard_ctrl_down(void) { return g_ctrl != 0; }
+int keyboard_alt_down(void) { return g_alt != 0; }
+int keyboard_caps_lock(void) { return g_caps != 0; }
+int keyboard_num_lock(void) { return g_num != 0; }
+int keyboard_scroll_lock(void) { return g_scroll != 0; }

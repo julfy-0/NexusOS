@@ -9,20 +9,27 @@
 #include "gdt.h"
 #include "idt.h"
 #include "paging.h"
+#include "pmm.h"
+#include "vmm.h"
+#include "heap.h"
 #include "pic.h"
 #include "kstate.h"
 #include "shell.h"
+#include "mount.h"
 #include "pit.h"
 #include "pci.h"
 #include "ahci.h"
+#include "nvme.h"
+#include "fat32.h"
 #include "keyboard.h"
 #include "gui.h"
 #include "usermode.h"
 #include "xhci.h"
+#include "gpu.h"
+#include "usb.h"
 #include "mouse.h"
 #include "target.h"
 #include "nexus_version.h"
-#include "system.h"
 
 void kmain(nexus_boot_info_t *boot_info) {
     console_init(&boot_info->fb);
@@ -52,6 +59,57 @@ void kmain(nexus_boot_info_t *boot_info) {
     console_print("Setting up paging (own PML4/PDPT/PD, identity map)");
     paging_init(boot_info);
     console_status_ok();
+
+    console_print("Initializing physical memory manager (PMM)");
+    pmm_init(boot_info);
+    if (pmm_total_pages() != 0) {
+        console_status_ok();
+        console_print("  -> managed pages: ");
+        console_print_dec(pmm_total_pages());
+        console_print(" | free: ");
+        console_print_dec(pmm_free_pages());
+        console_print(" | bitmap: ");
+        console_print_dec(pmm_bitmap_bytes());
+        console_print(" bytes\n");
+    } else {
+        console_status_warn();
+        console_print("  -> EFI memory map unavailable, PMM disabled\n");
+    }
+
+    console_print("Initializing virtual memory manager (4 KiB mappings)");
+    vmm_init();
+    console_status_ok();
+    console_print("  -> page size: ");
+    console_print_dec(vmm_page_size());
+    console_print(" bytes | CR3: 0x");
+    console_print_hex(paging_get_cr3());
+    console_print("\n");
+
+    console_print("Initializing kernel heap (kmalloc/kfree)");
+    heap_init();
+    if (heap_is_ready()) {
+        console_status_ok();
+        console_print("  -> virtual arena: 0x");
+        console_print_hex(heap_virtual_base());
+        console_print(" - 0x");
+        console_print_hex(heap_virtual_base() + (0x100000000000ULL));
+        console_print(" | alignment: 16 bytes\n");
+    } else {
+        console_status_warn();
+        console_print("  -> heap disabled: memory managers are not ready\n");
+    }
+
+    if (heap_is_ready()) {
+        void *heap_test = kmalloc(64);
+        if (heap_test != NULL) {
+            kfree(heap_test);
+            console_print("  -> allocator self-test: kmalloc(64) + kfree() OK\n");
+        } else {
+            console_set_color(COLOR_YELLOW, COLOR_BLACK);
+            console_print("  -> allocator self-test: FAILED\n");
+            console_set_color(COLOR_WHITE, COLOR_BLACK);
+        }
+    }
 
     console_print("Remapping PIC (IRQ0-15 -> vectors 32-47)");
     pic_remap();
@@ -85,42 +143,80 @@ void kmain(nexus_boot_info_t *boot_info) {
     pci_scan();
     console_status_ok();
 
-    console_print("Probing AHCI disk (SATA)");
-    if (ahci_init()) {
+    console_print("Probing NVMe controller (PCI, namespace 1)");
+    if (nvme_init()) {
         console_status_ok();
-        console_print("  -> AHCI block device ready\n");
+        console_print("  -> NVMe version: ");
+        console_print_dec(nvme_version_major());
+        console_print(".");
+        console_print_dec(nvme_version_minor());
+        console_print(" | namespace sectors: ");
+        console_print_dec(nvme_namespace_sectors());
+        console_print(" | sector size: ");
+        console_print_dec(nvme_sector_size());
+        console_print(" bytes\n");
     } else {
         console_status_warn();
-        console_print("  -> no AHCI disk found; storage services will remain offline\n");
+        console_print("  -> no supported NVMe namespace found\n");
+    }
+
+    console_print("Probing AHCI disk (SATA, port 0, LBA 0)");
+    if (ahci_init() && fat32_mount(0)) {
+        console_status_ok();
+        vfs_mount("ahci0p0", "/mnt/disk0", "fat32", VFS_MOUNT_RDONLY);
+        console_set_color(COLOR_CYAN, COLOR_BLACK);
+        console_print("  -> FAT32 mounted at /mnt/disk0, try 'diskls'\n");
+        console_set_color(COLOR_WHITE, COLOR_BLACK);
+    } else {
+        console_status_warn();
+        console_set_color(COLOR_YELLOW, COLOR_BLACK);
+        console_print("  -> no disk found, diskls/diskcat won't work, everything else is fine\n");
+        console_set_color(COLOR_WHITE, COLOR_BLACK);
     }
     console_print("\n");
 
-    console_print("Starting Nexus System");
-    if (nexus_system_init()) {
+    console_print("Initializing USB host controllers (USB 1.x - 3.2)");
+    if (usb_init()) {
         console_status_ok();
-        console_print("  -> Nexus System initialized\n");
-    } else {
-        console_status_warn();
-        console_print("  -> Nexus System initialization degraded; continuing with local services\n");
-    }
-    console_print("\n");
-
-    console_print("Initializing USB xHCI controller");
-    if (xhci_init()) {
-        console_status_ok();
-        console_print("  -> USB ports: ");
-        console_print_dec(xhci_port_count());
+        console_print("  -> controller: ");
+        console_print(usb_host_name());
+        console_print("\n  -> USB ports: ");
+        console_print_dec(usb_port_count());
         console_print(", connected: ");
-        console_print_dec(xhci_connected_ports());
+        console_print_dec(usb_connected_ports());
         console_print("\n");
-        if (xhci_keyboard_present()) {
+        if (usb_host_type() == USB_HOST_XHCI && xhci_keyboard_present()) {
             console_set_color(COLOR_CYAN, COLOR_BLACK);
             console_print("  -> USB keyboard ready\n");
             console_set_color(COLOR_WHITE, COLOR_BLACK);
         }
     } else {
         console_status_warn();
-        console_print("  -> no xHCI controller found or initialization failed\n");
+        console_print("  -> no supported USB host controller found\n");
+    }
+
+    console_print("Initializing Graphics subsystem");
+    if (gpu_init()) {
+        const nexus_gpu_info_t *gpu = gpu_get_info();
+        console_status_ok();
+        console_print("  -> GPU: ");
+        console_print(gpu->vendor_name);
+        console_print(" ");
+        console_print(gpu->device_name);
+        console_print("\n  -> PCI address: ");
+        console_print_dec(gpu->bus);
+        console_print(":");
+        console_print_dec(gpu->device);
+        console_print(".");
+        console_print_dec(gpu->function);
+        console_print(" | device ID: ");
+        console_print_hex(gpu->device_id);
+        console_print(" | BAR0: ");
+        console_print_hex(gpu->bar0);
+        console_print("\n");
+    } else {
+        console_status_warn();
+        console_print("  -> no PCI display controller found; GOP remains available\n");
     }
 
     console_print("Detecting system hardware");

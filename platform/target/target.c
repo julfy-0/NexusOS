@@ -6,6 +6,8 @@
 #include "console.h"
 #include "xhci.h"
 #include "ahci.h"
+#include "nvme.h"
+#include "gpu.h"
 
 static int str_equal(const char *a, const char *b) {
     int i = 0;
@@ -35,7 +37,7 @@ void target_get_status(nexus_target_status_t *status) {
     status->pci_devices = pci_get_device_count();
     status->system_info = 0;
     status->acpi = 0;
-    status->nvme = 0;
+    status->nvme = nvme_is_ready();
     status->network = 0;
     status->intel_wifi = 0;
     status->broadcom_pci = 0;
@@ -60,11 +62,13 @@ void target_get_status(nexus_target_status_t *status) {
             if (d->vendor_id == 0x8086) status->intel_wifi = 1;
             if (d->vendor_id == 0x14E4) status->broadcom_pci = 1;
         }
-        if (d->class_code == 0x03) {
-            if (d->vendor_id == 0x10DE) status->nvidia_gpu = 1;
-            if (d->vendor_id == 0x1002) status->amd_gpu = 1;
-            if (d->vendor_id == 0x8086) status->intel_gpu = 1;
-        }
+    }
+
+    const nexus_gpu_info_t *gpu = gpu_get_info();
+    if (gpu) {
+        status->nvidia_gpu = gpu->vendor == NEXUS_GPU_NVIDIA;
+        status->amd_gpu = gpu->vendor == NEXUS_GPU_AMD;
+        status->intel_gpu = gpu->vendor == NEXUS_GPU_INTEL;
     }
 }
 
@@ -92,10 +96,13 @@ void target_print_profile(void) {
     console_print("\n");
 
     console_print("  Graphics:     ");
-    if (s.nvidia_gpu) console_print("NVIDIA");
-    else if (s.amd_gpu) console_print("AMD");
-    else if (s.intel_gpu) console_print("Intel");
-    else console_print("not identified");
+    if (gpu_is_ready()) {
+        console_print(gpu_vendor_name());
+        console_print(" ");
+        console_print(gpu_device_name());
+    } else {
+        console_print("not identified");
+    }
     console_print(" (PCI detected)\n");
 
     console_print("  PCI devices:  "); console_print_dec(s.pci_devices); console_print("\n");

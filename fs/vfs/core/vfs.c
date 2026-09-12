@@ -34,19 +34,8 @@ static void path_copy(char *dst, const char *src) {
 }
 
 static int path_is_mount(const char *path, char *mountpoint) {
-    if (vfs_mount_count() <= 0) return -1;
+    if (vfs_mount_count() <= 0) return 0;
     return vfs_mount_resolve(path, mountpoint, 256);
-}
-
-static int fat_relative(const char *full, const char *mountpoint, char *out);
-
-static int select_fat_backend(const char *path, char *mountpoint, char *rel) {
-    int mount_index = path_is_mount(path, mountpoint);
-    if (mount_index < 0) return 0;
-    const vfs_mount_t *m = vfs_mount_get(mount_index);
-    if (!m || strcmp(m->fstype, "fat32") != 0 || m->backend < 0) return 0;
-    if (!fat32_select_mount(m->backend)) return 0;
-    return fat_relative(path, mountpoint, rel);
 }
 
 static int path_join(char *out, const char *base, const char *name) {
@@ -127,15 +116,9 @@ void vfs_init(void) {
     g_cwd = 0;
     path_copy(g_cwd_path, "/");
 
-    /* Persistent system namespace. Mountpoint directories are namespace entries, not FAT data. */
-    const char *dirs[] = { "boot", "system", "userdata", "mnt", "dev", "proc", "sys", "tmp" };
-    for (int i = 0; i < 8; ++i) {
-        int idx = i + 1;
-        g_nodes[idx].type = VFS_NODE_DIR;
-        g_nodes[idx].parent = 0;
-        copy_truncate(g_nodes[idx].name, dirs[i], VFS_NAME_LEN);
-    }
-    g_nodes[9].type = VFS_NODE_DIR; g_nodes[9].parent = 4; copy_truncate(g_nodes[9].name, "disk0", VFS_NAME_LEN);
+    /* Mountpoint directories are namespace entries, not FAT data. */
+    g_nodes[1].type = VFS_NODE_DIR; g_nodes[1].parent = 0; copy_truncate(g_nodes[1].name, "mnt", VFS_NAME_LEN);
+    g_nodes[2].type = VFS_NODE_DIR; g_nodes[2].parent = 1; copy_truncate(g_nodes[2].name, "disk0", VFS_NAME_LEN);
 }
 
 int vfs_mkdir(const char *name) {
@@ -170,11 +153,8 @@ int vfs_touch(const char *name) {
 
 int vfs_rm(const char *name) {
     if (g_cwd < 0) return -1;
-    if (g_cwd == 0 && (strcmp(name, "boot") == 0 || strcmp(name, "system") == 0 ||
-        strcmp(name, "userdata") == 0 || strcmp(name, "mnt") == 0 ||
-        strcmp(name, "dev") == 0 || strcmp(name, "proc") == 0 ||
-        strcmp(name, "sys") == 0 || strcmp(name, "tmp") == 0)) return -1;
-    if (g_cwd == 4 && strcmp(name, "disk0") == 0) return -1;
+    if ((g_cwd == 0 && strcmp(name, "mnt") == 0) ||
+        (g_cwd == 1 && strcmp(name, "disk0") == 0)) return -1;
     int idx = find_child(g_cwd, name);
     if (idx < 0) return -1;
 
@@ -222,8 +202,8 @@ int vfs_cd(const char *name) {
     }
 
     path_join(candidate, g_cwd_path, name);
-    if (select_fat_backend(candidate, mountpoint, rel) && fat32_is_mounted()) {
-        if (!fat32_is_directory(rel)) return -1;
+    if (path_is_mount(candidate, mountpoint) && fat32_is_mounted()) {
+        if (!fat_relative(candidate, mountpoint, rel) || !fat32_is_directory(rel)) return -1;
         path_copy(g_cwd_path, candidate);
         g_cwd = -1; /* mounted VFS backend */
         return 0;
@@ -255,7 +235,7 @@ int vfs_cd(const char *name) {
 
 void vfs_ls(void) {
     char mountpoint[256], rel[256];
-    if (select_fat_backend(g_cwd_path, mountpoint, rel) && fat32_is_mounted()) {
+    if (g_cwd < 0 && path_is_mount(g_cwd_path, mountpoint) && fat32_is_mounted() && fat_relative(g_cwd_path, mountpoint, rel)) {
         fat32_list(rel);
         return;
     }
@@ -298,7 +278,7 @@ void vfs_cat(const char *name) {
     char candidate[256], mountpoint[256], rel[256];
     if (g_cwd < 0 || name[0] == '/') {
         path_join(candidate, g_cwd_path, name);
-        if (select_fat_backend(candidate, mountpoint, rel) && fat32_is_mounted()) {
+        if (path_is_mount(candidate, mountpoint) && fat32_is_mounted() && fat_relative(candidate, mountpoint, rel)) {
             static unsigned char buf[64 * 1024];
             unsigned int size = 0;
             if (fat32_read_file(rel, buf, sizeof(buf) - 1, &size)) {
@@ -384,11 +364,8 @@ char *vfs_split_word(char *s) {
 
 int vfs_rmdir(const char *name) {
     if (g_cwd < 0) return -1;
-    if (g_cwd == 0 && (strcmp(name, "boot") == 0 || strcmp(name, "system") == 0 ||
-        strcmp(name, "userdata") == 0 || strcmp(name, "mnt") == 0 ||
-        strcmp(name, "dev") == 0 || strcmp(name, "proc") == 0 ||
-        strcmp(name, "sys") == 0 || strcmp(name, "tmp") == 0)) return -1;
-    if (g_cwd == 4 && strcmp(name, "disk0") == 0) return -1;
+    if ((g_cwd == 0 && strcmp(name, "mnt") == 0) ||
+        (g_cwd == 1 && strcmp(name, "disk0") == 0)) return -1;
     int idx = find_child(g_cwd, name);
     if (idx < 0 || g_nodes[idx].type != VFS_NODE_DIR) {
         return -1;

@@ -1,20 +1,16 @@
 #ifndef NEXUSOS_KEYBOARD_H
 #define NEXUSOS_KEYBOARD_H
+#include <stdint.h>
 
-/* Полная инициализация контроллера i8042: выключает оба PS/2-порта,
- * сбрасывает буфер, настраивает конфигурацию (IRQ1 включён, трансляция
- * scan code set 2 -> set 1 включена), снова включает порт клавиатуры и
- * отправляет самой клавиатуре команду "включить сканирование".
- *
- * Зачем это нужно: раньше драйвер просто читал порт 0x60 по IRQ1, ничего
- * не настраивая — полагаясь, что прошивка уже всё сделала. В QEMU это
- * работает (эмулированный 8042 снисходителен), но на части реального
- * железа после ExitBootServices состояние контроллера или его
- * конфигурация (в первую очередь бит трансляции) может быть не тем,
- * что мы ожидаем — тогда клавиатура молчит целиком, включая встроенную.
- * Вызывать один раз при старте, до sti. */
 void keyboard_init(void);
-
 void keyboard_handle_irq(void);
+int keyboard_is_present(void);
+
+int keyboard_shift_down(void);
+int keyboard_ctrl_down(void);
+int keyboard_alt_down(void);
+int keyboard_caps_lock(void);
+int keyboard_num_lock(void);
+int keyboard_scroll_lock(void);
 
 #endif

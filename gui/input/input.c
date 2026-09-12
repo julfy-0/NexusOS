@@ -70,7 +70,9 @@ void gui_input_update(void) {
     uint64_t now=pit_get_uptime_seconds();
     int redraw_needed=0;
     int moved=mouse_has_moved();
+    int wheel=mouse_get_wheel();
     if(moved){mouse_clear_moved();redraw_needed=1;}
+    if(wheel!=0){mouse_clear_wheel();redraw_needed=1;}
     int mx=mouse_get_x(), my=mouse_get_y();
     uint8_t buttons=mouse_get_buttons(), pressed=buttons & (uint8_t)~ctx->prev_buttons;
     ctx->prev_buttons=buttons;
@@ -78,6 +80,8 @@ void gui_input_update(void) {
     if(ctx->view==GUI_VIEW_SEARCH){
         int w=(int)ctx->fb->width*2/3,h=(int)ctx->fb->height*2/3;if(w<500)w=(int)ctx->fb->width-24;if(h<280)h=(int)ctx->fb->height-24;
         int x=((int)ctx->fb->width-w)/2,y=((int)ctx->fb->height-h)/2,count=gui_search_visible_count();
+        if(wheel>0 && count){ctx->search_selected=(ctx->search_selected+count-1)%count;redraw_needed=1;}
+        else if(wheel<0 && count){ctx->search_selected=(ctx->search_selected+1)%count;redraw_needed=1;}
         if(moved&&mx>=x+16&&mx<x+w-16&&my>=y+139&&my<y+144+count*34){int row=(my-(y+139))/34;if(row>=0&&row<count&&row!=ctx->search_selected){ctx->search_selected=row;redraw_needed=1;}}
         if((pressed&1)&&mx>=x+w-60&&my>=y&&my<y+42){ctx->view=GUI_VIEW_DESKTOP;redraw_needed=1;}
         else if((pressed&1)&&mx>=x+16&&mx<x+w-16&&my>=y+139&&my<y+144+count*34){int row=(my-(y+139))/34;if(row>=0&&row<count){ctx->search_selected=row;gui_search_execute();}redraw_needed=1;}
@@ -88,6 +92,8 @@ void gui_input_update(void) {
         else if((pressed&1)&&mx>=x+14&&mx<x+w-14&&my>=y+76&&my<y+104+count*28){gui_files_open_selected();redraw_needed=1;}
     } else if(ctx->view==GUI_VIEW_SETTINGS){
         int w=(int)ctx->fb->width*2/3,h=(int)ctx->fb->height*2/3;if(w<520)w=(int)ctx->fb->width-24;if(h<330)h=(int)ctx->fb->height-24;int x=((int)ctx->fb->width-w)/2,y=((int)ctx->fb->height-h)/2;
+        if(wheel>0){ctx->settings_item=(ctx->settings_item+4)%5;redraw_needed=1;}
+        else if(wheel<0){ctx->settings_item=(ctx->settings_item+1)%5;redraw_needed=1;}
         if(moved&&mx>=x+14&&mx<x+w-14&&my>=y+76&&my<y+82+5*42){int item=(my-(y+76))/42;if(item<0)item=0;if(item>4)item=4;if(item!=ctx->settings_item){ctx->settings_item=item;redraw_needed=1;}}
         if((pressed&1)&&mx>=x+w-60&&my>=y&&my<y+36){ctx->view=GUI_VIEW_DESKTOP;redraw_needed=1;}
         else if((pressed&1)&&mx>=x+14&&mx<x+w-14&&my>=y+76&&my<y+82+5*42){gui_settings_select();redraw_needed=1;}

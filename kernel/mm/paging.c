@@ -163,3 +163,136 @@ uint64_t paging_get_cr3(void) {
 uint64_t paging_base_identity_gib(void) {
     return BASE_IDENTITY_GIB;
 }
+
+/* -------------------------------------------------------------------------
+ * 4 KiB page-table operations for VMM.
+ *
+ * The original identity map deliberately remains 2 MiB based. When a VMM
+ * mapping is requested outside an existing huge-page mapping, these helpers
+ * allocate the missing PML4/PDPT/PD/PT pages from PMM and install a normal
+ * 4 KiB PTE. This is intentionally separate from the boot-time identity map.
+ * ------------------------------------------------------------------------- */
+#include "pmm.h"
+
+#define PTE_USER 0x004ULL
+#define PTE_NX   (1ULL << 63)
+#define PT_INDEX_MASK 0x1FFULL
+
+static uint64_t *table_from_phys(uint64_t phys) {
+    /* The current kernel is identity-mapped through the first 4 GiB. Keep
+     * page-table allocations there until the higher-half/recursive mapping
+     * milestone provides a permanent mapping for arbitrary physical RAM. */
+    if (phys >= 0x100000000ULL) return NULL;
+    return (uint64_t *)(uintptr_t)phys;
+}
+
+static uint64_t alloc_table_page(void) {
+    uint64_t phys = pmm_alloc_page();
+    if (phys == 0 || phys >= 0x100000000ULL) {
+        if (phys != 0) pmm_free_page(phys);
+        return 0;
+    }
+    uint64_t *table = table_from_phys(phys);
+    if (table == NULL) {
+        pmm_free_page(phys);
+        return 0;
+    }
+    zero_table(table);
+    return phys;
+}
+
+static uint64_t *walk_create(uint64_t virtual_address, int create) {
+    uint64_t pml4_index = (virtual_address >> 39) & PT_INDEX_MASK;
+    uint64_t pdpt_index = (virtual_address >> 30) & PT_INDEX_MASK;
+    uint64_t pd_index   = (virtual_address >> 21) & PT_INDEX_MASK;
+
+    uint64_t *pml4_table = pml4;
+    uint64_t entry = pml4_table[pml4_index];
+    if (!(entry & PTE_PRESENT)) {
+        if (!create) return NULL;
+        uint64_t phys = alloc_table_page();
+        if (phys == 0) return NULL;
+        pml4_table[pml4_index] = phys | PTE_PRESENT | PTE_WRITABLE;
+        entry = pml4_table[pml4_index];
+    }
+
+    uint64_t *pdpt_table = table_from_phys(entry & ~0xFFFULL);
+    if (pdpt_table == NULL) return NULL;
+    entry = pdpt_table[pdpt_index];
+    if (!(entry & PTE_PRESENT)) {
+        if (!create) return NULL;
+        uint64_t phys = alloc_table_page();
+        if (phys == 0) return NULL;
+        pdpt_table[pdpt_index] = phys | PTE_PRESENT | PTE_WRITABLE;
+        entry = pdpt_table[pdpt_index];
+    }
+    if (entry & PTE_HUGE) return NULL;
+
+    uint64_t *pd_table = table_from_phys(entry & ~0xFFFULL);
+    if (pd_table == NULL) return NULL;
+    entry = pd_table[pd_index];
+    if (!(entry & PTE_PRESENT)) {
+        if (!create) return NULL;
+        uint64_t phys = alloc_table_page();
+        if (phys == 0) return NULL;
+        pd_table[pd_index] = phys | PTE_PRESENT | PTE_WRITABLE;
+        entry = pd_table[pd_index];
+    }
+    if (entry & PTE_HUGE) return NULL;
+
+    return table_from_phys(entry & ~0xFFFULL);
+}
+
+int paging_map_page(uint64_t virtual_address, uint64_t physical_address, uint64_t flags) {
+    if ((virtual_address & 0xFFFULL) != 0 || (physical_address & 0xFFFULL) != 0) return -1;
+    uint64_t *pt = walk_create(virtual_address, 1);
+    if (pt == NULL) return -1;
+
+    uint64_t index = (virtual_address >> 12) & PT_INDEX_MASK;
+    if (pt[index] & PTE_PRESENT) return 1; /* already mapped: do not overwrite */
+
+    uint64_t pte_flags = flags | PTE_PRESENT;
+    pt[index] = (physical_address & ~0xFFFULL) | pte_flags;
+    __asm__ volatile ("invlpg (%0)" : : "r"((void *)(uintptr_t)virtual_address) : "memory");
+    return 0;
+}
+
+int paging_unmap_page(uint64_t virtual_address) {
+    if ((virtual_address & 0xFFFULL) != 0) return 0;
+    uint64_t *pt = walk_create(virtual_address, 0);
+    if (pt == NULL) return 0;
+
+    uint64_t index = (virtual_address >> 12) & PT_INDEX_MASK;
+    if (!(pt[index] & PTE_PRESENT)) return 0;
+    pt[index] = 0;
+    __asm__ volatile ("invlpg (%0)" : : "r"((void *)(uintptr_t)virtual_address) : "memory");
+    return 1;
+}
+
+uint64_t paging_virt_to_phys(uint64_t virtual_address) {
+    uint64_t pml4_index = (virtual_address >> 39) & PT_INDEX_MASK;
+    uint64_t pdpt_index = (virtual_address >> 30) & PT_INDEX_MASK;
+    uint64_t pd_index   = (virtual_address >> 21) & PT_INDEX_MASK;
+    uint64_t pt_index   = (virtual_address >> 12) & PT_INDEX_MASK;
+
+    uint64_t entry = pml4[pml4_index];
+    if (!(entry & PTE_PRESENT)) return 0;
+    uint64_t *pdpt_table = table_from_phys(entry & ~0xFFFULL);
+    if (pdpt_table == NULL) return 0;
+
+    entry = pdpt_table[pdpt_index];
+    if (!(entry & PTE_PRESENT)) return 0;
+    if (entry & PTE_HUGE) return (entry & 0xFFFFFC0000000ULL) | (virtual_address & 0x3FFFFFFFULL);
+    uint64_t *pd_table = table_from_phys(entry & ~0xFFFULL);
+    if (pd_table == NULL) return 0;
+
+    entry = pd_table[pd_index];
+    if (!(entry & PTE_PRESENT)) return 0;
+    if (entry & PTE_HUGE) return (entry & 0xFFFFFFE00000ULL) | (virtual_address & 0x1FFFFFULL);
+    uint64_t *pt = table_from_phys(entry & ~0xFFFULL);
+    if (pt == NULL) return 0;
+
+    entry = pt[pt_index];
+    if (!(entry & PTE_PRESENT)) return 0;
+    return (entry & ~0xFFFULL) | (virtual_address & 0xFFFULL);
+}

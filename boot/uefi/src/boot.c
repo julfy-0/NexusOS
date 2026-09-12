@@ -2,8 +2,7 @@
  * NexusOS Bootloader (BOOTX64.EFI)
  *
  * 1. печатает баннер и находит видеорежим (GOP)
- * 2. находит GPT SYSTEM-раздел и открывает \kernel\kernel.elf
- *    (с fallback на старый \kernel.elf в BOOT для совместимости)
+ * 2. открывает \kernel.elf на том же диске, с которого сам загрузился
  * 3. парсит ELF64, раскладывает PT_LOAD-сегменты по нужным физическим адресам
  * 4. получает финальную memory map, зовёт ExitBootServices()
  * 5. прыгает в точку входа ядра, передавая nexus_boot_info_t*
@@ -122,79 +121,40 @@ static void panic(CHAR16 *msg) {
 /* Читает весь файл целиком в буфер, выделенный через AllocatePool.
  * Возвращает адрес буфера и записывает размер в *out_size. */
 static void *load_file(EFI_FILE_PROTOCOL *root, CHAR16 *name, UINTN *out_size) {
-    EFI_FILE_PROTOCOL *file = NULL;
+    EFI_FILE_PROTOCOL *file;
     EFI_STATUS status = root->Open(root, &file, name, EFI_FILE_MODE_READ, 0);
-    if (EFI_ERROR(status)) return NULL;
+    if (EFI_ERROR(status)) {
+        panic(u"cannot open file");
+    }
 
+    /* Узнаём размер файла через GetInfo(EFI_FILE_INFO_GUID) */
     EFI_GUID info_guid = EFI_FILE_INFO_GUID;
-    UINTN info_size = sizeof(EFI_FILE_INFO) + 512;
-    EFI_FILE_INFO *info = NULL;
-    status = g_bs->AllocatePool(EfiLoaderData, info_size, (void **)&info);
-    if (EFI_ERROR(status)) { file->Close(file); return NULL; }
+    UINTN info_size = sizeof(EFI_FILE_INFO) + 512; /* с запасом под имя файла */
+    EFI_FILE_INFO *info;
+    g_bs->AllocatePool(EfiLoaderData, info_size, (void **)&info);
     status = file->GetInfo(file, &info_guid, &info_size, info);
-    if (EFI_ERROR(status)) { g_bs->FreePool(info); file->Close(file); return NULL; }
+    if (EFI_ERROR(status)) {
+        panic(u"GetInfo failed");
+    }
 
     UINTN file_size = info->FileSize;
     g_bs->FreePool(info);
-    if (file_size == 0) { file->Close(file); return NULL; }
 
-    void *buffer = NULL;
+    void *buffer;
     status = g_bs->AllocatePool(EfiLoaderData, file_size, &buffer);
-    if (EFI_ERROR(status)) { file->Close(file); return NULL; }
+    if (EFI_ERROR(status)) {
+        panic(u"AllocatePool failed");
+    }
 
     UINTN read_size = file_size;
     status = file->Read(file, &read_size, buffer);
-    file->Close(file);
-    if (EFI_ERROR(status) || read_size != file_size) {
-        g_bs->FreePool(buffer);
-        return NULL;
+    if (EFI_ERROR(status)) {
+        panic(u"Read failed");
     }
+
+    file->Close(file);
     *out_size = file_size;
     return buffer;
-}
-
-/* GUID byte order as stored in GPT entries. SYSTEM is deliberately a private
- * NexusOS partition type, so the bootloader never confuses it with the EFI
- * System Partition. */
-static const uint8_t NEXUS_SYSTEM_TYPE_GUID[16] = {
-    0x4e,0x58,0x53,0x59,0x53,0x54,0x45,0x4d,
-    0x50,0x41,0x52,0x54,0x30,0x30,0x31,0x00
-};
-
-static int guid_bytes_equal(const uint8_t *a, const uint8_t *b) {
-    for (int i = 0; i < 16; ++i) if (a[i] != b[i]) return 0;
-    return 1;
-}
-
-static EFI_FILE_PROTOCOL *open_system_volume(EFI_HANDLE boot_handle) {
-    EFI_GUID block_guid = EFI_BLOCK_IO_PROTOCOL_GUID;
-    EFI_GUID sfs_guid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
-    EFI_HANDLE *handles = NULL;
-    UINTN count = 0;
-
-    if (!g_bs->LocateHandleBuffer) return NULL;
-    EFI_STATUS status = g_bs->LocateHandleBuffer(ByProtocol, &block_guid, NULL, &count, &handles);
-    if (EFI_ERROR(status) || !handles) return NULL;
-
-    EFI_FILE_PROTOCOL *system_root = NULL;
-    for (UINTN i = 0; i < count; ++i) {
-        EFI_BLOCK_IO_PROTOCOL *bio = NULL;
-        status = g_bs->HandleProtocol(handles[i], &block_guid, (void **)&bio);
-        if (EFI_ERROR(status) || !bio || !bio->Media || !bio->Media->MediaPresent) continue;
-        if (!bio->Media->LogicalPartition) continue;
-        if (!guid_bytes_equal(bio->Media->PartitionTypeGUID, NEXUS_SYSTEM_TYPE_GUID)) continue;
-
-        EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *sfs = NULL;
-        status = g_bs->HandleProtocol(handles[i], &sfs_guid, (void **)&sfs);
-        if (EFI_ERROR(status) || !sfs) continue;
-        status = sfs->OpenVolume(sfs, &system_root);
-        if (!EFI_ERROR(status) && system_root) break;
-        system_root = NULL;
-    }
-
-    g_bs->FreePool(handles);
-    (void)boot_handle;
-    return system_root;
 }
 
 /* Парсит ELF64, раскладывает PT_LOAD сегменты по их физическим адресам.
@@ -413,27 +373,15 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
         panic(u"cannot get SimpleFileSystemProtocol");
     }
 
-    EFI_FILE_PROTOCOL *boot_root = NULL;
-    status = sfs->OpenVolume(sfs, &boot_root);
+    EFI_FILE_PROTOCOL *root = NULL;
+    status = sfs->OpenVolume(sfs, &root);
     if (EFI_ERROR(status)) {
         panic(u"OpenVolume failed");
     }
 
-    boot_progress(3, 7, u"Locating SYSTEM partition");
-    EFI_FILE_PROTOCOL *system_root = open_system_volume(loaded_image->DeviceHandle);
-    EFI_FILE_PROTOCOL *kernel_root = system_root ? system_root : boot_root;
-    CHAR16 *kernel_path = system_root ? u"\\kernel\\kernel.elf" : u"\\kernel.elf";
-
-    boot_progress(4, 7, u"Loading kernel image");
-    UINTN kernel_size = 0;
-    void *kernel_data = load_file(kernel_root, kernel_path, &kernel_size);
-    if (!kernel_data) {
-        if (system_root) {
-            /* Compatibility path for pre-0.5.2 images: keep old boot flow alive. */
-            kernel_data = load_file(boot_root, u"\\kernel.elf", &kernel_size);
-        }
-        if (!kernel_data) panic(u"cannot load kernel.elf from SYSTEM or BOOT");
-    }
+    boot_progress(3, 7, u"Loading kernel image");
+    UINTN kernel_size;
+    void *kernel_data = load_file(root, u"\\kernel.elf", &kernel_size);
 
     boot_progress(4, 7, u"Preparing kernel memory");
     uint64_t entry_point = load_elf(kernel_data);
@@ -462,7 +410,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     boot_info.mmap.descriptor_size = desc_size;
     boot_info.mmap.descriptor_version = desc_version;
 
-    boot_progress(7, 7, u"Starting NexusOS 0.5.2 - System Foundation");
+    boot_progress(7, 7, u"Starting NexusOS 0.5.1 - Desktop Update");
     status = g_bs->ExitBootServices(ImageHandle, map_key);
     if (EFI_ERROR(status)) {
         /* Карта могла устареть между вызовами (это нормально по спеке) —

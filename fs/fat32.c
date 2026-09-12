@@ -62,32 +62,19 @@ typedef struct {
 
 static int memcmp_local(const void *a, const void *b, int n);
 
-#define FAT32_MAX_MOUNTS 4
+static uint64_t g_partition_lba;
+static uint32_t g_bytes_per_sector;
+static uint32_t g_sectors_per_cluster;
+static uint32_t g_root_cluster;
+static uint64_t g_fat_start_lba;
+static uint64_t g_cluster_heap_start_lba;
+static int g_mounted = 0;
 
-typedef struct {
-    uint64_t partition_lba;
-    uint32_t bytes_per_sector;
-    uint32_t sectors_per_cluster;
-    uint32_t root_cluster;
-    uint64_t fat_start_lba;
-    uint64_t cluster_heap_start_lba;
-    int mounted;
-    uint8_t cluster_buf[MAX_SECTORS_PER_READ * 512];
-    uint8_t fat_buf[512];
-} fat32_context_t;
-
-static fat32_context_t g_contexts[FAT32_MAX_MOUNTS];
-static fat32_context_t *g_ctx = &g_contexts[0];
-
-#define g_partition_lba         (g_ctx->partition_lba)
-#define g_bytes_per_sector     (g_ctx->bytes_per_sector)
-#define g_sectors_per_cluster  (g_ctx->sectors_per_cluster)
-#define g_root_cluster         (g_ctx->root_cluster)
-#define g_fat_start_lba        (g_ctx->fat_start_lba)
-#define g_cluster_heap_start_lba (g_ctx->cluster_heap_start_lba)
-#define g_mounted              (g_ctx->mounted)
-#define g_cluster_buf          (g_ctx->cluster_buf)
-#define g_fat_buf              (g_ctx->fat_buf)
+/* Общий рабочий буфер под содержимое кластера/директории. Кластер не может
+ * быть больше MAX_SECTORS_PER_READ секторов — это же ограничение диктует
+ * ahci_read_sectors(), так что размер буфера всегда достаточен. */
+static uint8_t g_cluster_buf[MAX_SECTORS_PER_READ * 512];
+static uint8_t g_fat_buf[512];
 
 static uint64_t cluster_to_lba(uint32_t cluster) {
     return g_cluster_heap_start_lba + (uint64_t)(cluster - 2) * g_sectors_per_cluster;
@@ -144,9 +131,7 @@ static void to_short_name(const char *input, uint8_t out[11]) {
     }
 }
 
-int fat32_mount_partition(uint64_t partition_lba, int slot) {
-    if (slot < 0 || slot >= FAT32_MAX_MOUNTS) return 0;
-    g_ctx = &g_contexts[slot];
+int fat32_mount(uint64_t partition_lba) {
     g_mounted = 0;
 
     static uint8_t vbr[512];
@@ -179,16 +164,6 @@ int fat32_mount_partition(uint64_t partition_lba, int slot) {
     g_cluster_heap_start_lba = g_fat_start_lba + (uint64_t)bpb->num_fats * bpb->fat_size32;
 
     g_mounted = 1;
-    return 1;
-}
-
-int fat32_mount(uint64_t partition_lba) {
-    return fat32_mount_partition(partition_lba, 0);
-}
-
-int fat32_select_mount(int slot) {
-    if (slot < 0 || slot >= FAT32_MAX_MOUNTS || !g_contexts[slot].mounted) return 0;
-    g_ctx = &g_contexts[slot];
     return 1;
 }
 

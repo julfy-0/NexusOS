@@ -46,4 +46,10 @@ uint64_t paging_base_identity_gib(void);
  * 2 MiB, как и остальная identity-map. */
 void paging_map_region(uint64_t start, uint64_t end);
 
+/* 4 KiB mappings used by the Virtual Memory Manager. These APIs allocate
+ * page-table pages from PMM and update the active address space. */
+int paging_map_page(uint64_t virtual_address, uint64_t physical_address, uint64_t flags);
+int paging_unmap_page(uint64_t virtual_address);
+uint64_t paging_virt_to_phys(uint64_t virtual_address);
+
 #endif

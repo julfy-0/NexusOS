@@ -1,80 +1,66 @@
-# Building NexusOS 0.5.2
+# BUILDING.md
 
-## Requirements
+## Хорошая новость по сравнению с прежней (BIOS/i386) версией
 
-Kernel/bootloader build:
+**Кросс-компилятор не нужен.** Если ты собираешь на x86_64 Linux —
+обычный `gcc`/`ld`, которые уже есть в системе, справляются: EFI-
+загрузчик — это PE32+ x86-64 (та же архитектура, что у хоста, просто
+другой формат исполняемого файла — `ld -m i386pep` умеет его собирать
+из стокового `binutils`), ядро — обычный freestanding ELF64 x86-64.
 
-- x86_64 Linux
-- GCC
-- GNU binutils
-- GNU Make
-- Python 3 for the dependency-free image builder
+## Зависимости
 
-QEMU runtime additionally requires:
+Для `make` (просто собрать бинарники):
+- `gcc`, `binutils` (`ld`) — почти наверняка уже есть
 
-- `qemu-system-x86_64`
-- OVMF firmware
+Дополнительно для `make run` (запуск в QEMU):
+```bash
+sudo apt install qemu-system-x86 ovmf dosfstools mtools
+```
+- `qemu-system-x86_64` — эмулятор
+- `ovmf` — прошивка UEFI для QEMU (`/usr/share/OVMF/OVMF_CODE_4M.fd`
+  и `OVMF_VARS_4M.fd`)
+- `dosfstools` — даёт `mkfs.vfat` (создать FAT-образ диска)
+- `mtools` — даёт `mcopy` (скопировать файлы в FAT-образ без monut)
 
-The project does not require CMake, a C++ compiler, or a kernel libc.
-
-## Build
+## Сборка
 
 ```bash
-make clean
-make
-make iso
+make             # build/BOOTX64.EFI + build/kernel.elf
+make iso         # + iso/EFI/BOOT/BOOTX64.EFI, iso/kernel.elf (структура ESP)
+make run         # + build/fat.img, запуск в QEMU с OVMF
+make clean       # удалить build/ и iso/
 ```
 
-The compatibility `iso/` staging area contains the EFI bootloader and a legacy
-copy of `kernel.elf`. The production disk image is created separately by
-`create-img.sh`.
+`OVMF_VARS.fd` в корне проекта — рабочая копия NVRAM-переменных
+прошивки; `make run` создаёт её сам при первом запуске, если её нет
+(копирует эталон из `/usr/share/OVMF/`). Если QEMU не грузится —
+попробуй удалить `OVMF_VARS.fd` и запустить `make run` заново (она
+могла испортиться после прерванного предыдущего запуска).
 
-The parallel frontend can be used with:
+## Если что-то не собирается
 
-```bash
-NEXUS_BUILD_JOBS=8 ./build.sh
-```
+`make check` — прогонит `-fsyntax-only` по всем `.c` (без загрузчика,
+он на другом ABI/формате) — быстрая проверка синтаксиса.
 
-## Disk image
+## Отладка
 
-Interactive:
-
-```bash
-./create-img.sh
-```
-
-Non-interactive:
-
-```bash
-./create-img.sh --userdata 512M
-./create-img.sh --userdata 1G
-./create-img.sh --userdata 2G
-./create-img.sh --userdata 4G
-./create-img.sh --userdata 10G
-```
-
-The resulting `NexusOS.img` is a real GPT image with three real FAT32
-partitions. `tools/create-fat32.py` is used when host `dosfstools`/`mtools`
-are unavailable, so image creation does not silently fall back to a single
-folder-backed image.
-
-## Run
-
-```bash
-./run.sh
-```
-
-or:
-
-```bash
-./run.sh --window
-./run.sh --no-kvm
-./run.sh --mem 512
-./run.sh --rebuild
-```
-
-Set the default USERDATA size for automatic image creation with:
-
-```bash
-NEXUS_USERDATA_SIZE=2G ./run.sh
-```
+- QEMU-окно с UEFI Shell вместо загрузки NexusOS — значит,
+  `BOOTX64.EFI` не нашёлся или не подходит по формату/архитектуре;
+  проверь, что `iso/EFI/BOOT/BOOTX64.EFI` реально существует и что
+  `file build/BOOTX64.EFI` показывает `PE32+ ... (EFI application)
+  x86-64`
+- Зависание сразу после "Exiting boot services..." — скорее всего,
+  что-то не так в `kernel/arch/x86_64/entry.S` или в `gdt_init()`/`idt_init()`
+  до того, как консоль успела что-то напечатать; добавь
+  `qemu-system-x86_64 ... -no-reboot -d int` для трассировки прерываний
+- Клавиатура не отвечает — `drivers/input/keyboard/keyboard.c` явно
+  инициализирует контроллер i8042 (не просто читает порт), но если
+  всё равно молчит — проверь, что PIC размаскировал IRQ1
+  (`kernel/core/kernel.c`: `pic_set_mask(i, i != 0 && i != 1)`)
+- `diskls`/`diskcat` говорят "не найден диск" — AHCI не нашёл
+  SATA-контроллер или диск не на порту 0; это ожидаемо в минимальной
+  QEMU-конфигурации без явно добавленного `-drive` для AHCI (диск
+  для FAT-образа NexusOS подключён как обычный `-drive format=raw`,
+  это ДРУГОЙ путь чтения — сам NexusOS его не видит через свой
+  AHCI-драйвер, только UEFI видел его на этапе загрузчика)

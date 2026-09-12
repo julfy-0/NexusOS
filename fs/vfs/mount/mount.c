@@ -26,7 +26,6 @@ void vfs_mount_init(void) {
         mounts[i].target[0] = 0;
         mounts[i].fstype[0] = 0;
         mounts[i].flags = 0;
-        mounts[i].backend = -1;
     }
 
     /* Linux-like NexusOS virtual filesystem layout. */
@@ -39,11 +38,6 @@ void vfs_mount_init(void) {
 
 int vfs_mount(const char *source, const char *target,
               const char *fstype, uint32_t flags) {
-    return vfs_mount_backend(source, target, fstype, flags, -1);
-}
-
-int vfs_mount_backend(const char *source, const char *target,
-                      const char *fstype, uint32_t flags, int backend) {
     if (!source || !target || !fstype || !target[0]) return -1;
 
     /* Replace an existing mount at the same target. */
@@ -52,7 +46,6 @@ int vfs_mount_backend(const char *source, const char *target,
             str_copy(mounts[i].source, source, VFS_PATH_MAX);
             str_copy(mounts[i].fstype, fstype, VFS_FSTYPE_MAX);
             mounts[i].flags = flags;
-            mounts[i].backend = backend;
             return i;
         }
     }
@@ -64,7 +57,6 @@ int vfs_mount_backend(const char *source, const char *target,
             str_copy(mounts[i].target, target, VFS_PATH_MAX);
             str_copy(mounts[i].fstype, fstype, VFS_FSTYPE_MAX);
             mounts[i].flags = flags;
-            mounts[i].backend = backend;
             return i;
         }
     }
