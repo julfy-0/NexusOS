@@ -9,7 +9,7 @@ descent — импортированный проект принёс "archive" (
 
 ## NexusOS 0.5.2 → 0.6.0 master plan
 
-This is the active development roadmap. The current release baseline is **0.5.18 — Enstein**;
+This is the active development roadmap. The current release baseline is **0.5.24 — Enstein**;
 0.5.4 — Processes & Userspace Foundation is complete as a foundation milestone.
 0.5.5 — Shell & I/O Foundation is integrated.
 0.5.6 — Unified Input & USB HID is integrated.
@@ -188,6 +188,41 @@ the existing VFS. File descriptors and persistent writable FAT32 remain future w
 - [ ] Scheduler-owned user processes
 - [ ] Private CR3 per process
 
+### 0.5.23 — Safe userspace memory access
+
+- [x] Add kernel-to-userspace read/write access helpers with explicit range validation
+- [x] Require writable user mappings for kernel writes into userspace
+- [x] Reject userspace memory access for zombie/invalid processes
+- [x] Reuse private CR3 translation for bounded cross-address-space copies
+- [x] Preserve the existing ELF loader write path for non-writable executable mappings
+
+### 0.5.21 — Syscall validation and Ring-3 ABI hardening
+
+- [x] Validate syscall caller process ownership and scheduler TCB association
+- [x] Validate Ring-3 return-frame selectors and RFLAGS policy
+- [x] Validate syscall RIP against mapped executable userspace memory
+- [x] Validate user RSP against mapped writable userspace memory
+- [x] Reject syscall dispatch when no valid scheduler-owned user process is active
+- [x] Preserve non-blocking/capture-only IRQ architecture
+
+### 0.5.20 — Process lifecycle and safe reaping
+
+- [x] Separate process termination from resource destruction
+- [x] Introduce `PROCESS_ZOMBIE` lifecycle state
+- [x] Preserve private CR3/user memory until the scheduler leaves the process
+- [x] Record process exit code/reason metadata
+- [x] Scheduler-owned process reaping after TCB hand-off
+- [x] Prevent PID/slot reuse while a process remains a zombie
+- [x] Keep kernel-mode exceptions fatal and user page faults process-local
+
+### 0.5.19 — User page-fault isolation
+
+- [x] Ring-3 page-fault detection using the CPL in the saved CS
+- [x] CR2/error-code diagnostics
+- [x] Faulting scheduler-owned user process termination
+- [x] Return to scheduler instead of global Kernel Panic for user page faults
+- [x] Kernel-mode page faults remain fatal
+
 ### 0.5.17 — Syscall entry/return foundation
 
 - [x] DPL3 `INT 0x80` syscall gate
@@ -315,6 +350,26 @@ complete. At that point the block receives a GitHub Release description.
 - Ring-3 foundation: user code/data selectors and 64-bit TSS with rsp0.
 - Next: 4 KiB user pages with U/S permission, syscall entry, process object, scheduler, ELF user loader.
 
+
+
+### 0.5.23 — Userspace console output syscall
+
+- [x] Bounded `WRITE` syscall for stdout/stderr
+- [x] Validate complete userspace buffer before access
+- [x] Copy userspace data through private CR3 helpers
+- [x] Non-blocking console output path
+- [ ] File-descriptor-backed userspace I/O
+
+### 0.5.24 — Per-process file descriptor foundation
+
+- [x] Fixed-size per-process file descriptor table
+- [x] Standard descriptors 0/1/2 initialized for every process
+- [x] Descriptor type tracking for future VFS-backed handles
+- [x] Route userspace `WRITE` through the process descriptor table
+- [x] Add `CLOSE` syscall for process-owned descriptors
+- [x] Reset descriptor state during process reaping
+- [ ] VFS/FAT32 file descriptor objects
+- [ ] Blocking `READ` and stdin event delivery
 
 ### 0.5.18 — Private process address spaces
 

@@ -1,3 +1,114 @@
+## NexusOS 0.5.24 — Per-Process File Descriptor Foundation
+
+### Added
+- Fixed-size per-process file descriptor table.
+- Standard input, output and error descriptors.
+- Descriptor type tracking for future VFS-backed handles.
+- `CLOSE` syscall for open descriptors.
+
+### Syscall
+- `WRITE` now resolves stdout/stderr through the current process descriptor table.
+- Added `NEXUS_SYS_CLOSE`.
+- Closed descriptors are rejected by subsequent descriptor-based syscalls.
+
+### Process
+- File descriptor state is initialized when a process is created.
+- File descriptor state is cleared during safe process reaping.
+- Descriptor ownership remains private to each process.
+
+### Notes
+- Userspace memory validation from NexusOS 0.5.22 is preserved.
+- Userspace console output from NexusOS 0.5.23 is preserved.
+- VFS-backed file descriptors and blocking stdin remain future work.
+
+## NexusOS 0.5.23 — Userspace Console Output
+
+### Added
+- Bounded userspace `WRITE` syscall.
+- stdout/stderr console output from Ring 3.
+
+### Syscall
+- Added `NEXUS_SYS_WRITE`.
+- Supports file descriptors `1` and `2`.
+- Returns the number of bytes written on success.
+- Limits one write operation to 4096 bytes.
+
+### Security
+- Complete userspace buffers are validated before access.
+- User data is copied through the process private CR3.
+- Zombie and invalid processes remain blocked by the existing syscall validation.
+
+### Notes
+- Syscall validation from NexusOS 0.5.21 is preserved.
+- Safe userspace memory access from NexusOS 0.5.22 is now used by a real syscall path.
+- Higher-half kernel work remains intentionally deferred to preserve boot stability.
+
+## NexusOS 0.5.22 — Safe Userspace Memory Access
+
+### Added
+- Bounded kernel-to-userspace read/write helpers.
+- Userspace range validation before cross-address-space copies.
+- Writable-page enforcement for kernel writes.
+
+### Process Memory
+- Userspace access uses the process private CR3 translation.
+- Zombie and invalid processes are rejected by the new access helpers.
+- Multi-page reads and writes are handled safely across page boundaries.
+
+### Security
+- Kernel writes into userspace require `VMM_PAGE_WRITABLE`.
+- Userspace accesses are constrained to the process-owned virtual address range.
+- Existing ELF loading remains compatible with executable non-writable mappings.
+
+### Notes
+- Syscall validation from NexusOS 0.5.21 is preserved.
+- Process lifecycle and safe reaping from NexusOS 0.5.20 are preserved.
+- Higher-half kernel work remains intentionally deferred to preserve boot stability.
+
+## NexusOS 0.5.21 — Syscall Validation and Ring-3 ABI Hardening
+
+### Added
+- Syscall caller/process ownership validation.
+- Ring-3 return-frame validation.
+- Userspace RIP mapping validation.
+- Userspace writable stack validation.
+
+### Syscalls
+- Syscalls are accepted only from scheduler-owned Ring-3 processes.
+- Syscall return selectors must match the NexusOS user ABI.
+- Ring-3 RFLAGS are validated before returning to userspace.
+- Invalid syscall contexts are rejected without modifying scheduler state.
+
+### Process Isolation
+- Syscall instruction pointers must belong to mapped executable userspace memory.
+- User stack pointers must reference mapped writable userspace memory.
+- Zombie and non-user processes cannot enter the syscall dispatcher.
+
+### Notes
+- Preserves the private CR3 process model from NexusOS 0.5.18.
+- Preserves user page-fault isolation and safe reaping from NexusOS 0.5.19/0.5.20.
+- Capture-only hardware IRQ architecture remains unchanged.
+- Higher-half kernel work remains intentionally deferred to preserve boot stability.
+
+## 0.5.20 — Enstein — Process lifecycle and safe reaping
+
+- Replaced immediate process resource destruction with a two-phase EXITED/ZOMBIE-style lifecycle using `PROCESS_ZOMBIE`.
+- `process_exit()` now records exit metadata and marks the process zombie without destroying the active private CR3.
+- Added scheduler-safe `process_reap()` to release user mappings and private page tables only after the process TCB has stopped running.
+- Prevented process slots and PIDs from being reused while a process remains a zombie.
+- Added process exit-code/reason metadata and zombie-count diagnostics API.
+- Hardened scheduler idle handling so a terminated current thread can never be revived as `THREAD_RUNNING` merely because the ready queue is empty.
+- Preserved the 0.5.19 user page-fault isolation boundary and capture-only IRQ architecture.
+
+## 0.5.19 — Enstein — User page-fault isolation
+
+- Added recoverable Ring-3 page-fault handling for scheduler-owned user processes.
+- Page-fault diagnostics now report CR2, error-code cause, access type, privilege level, RIP and RFLAGS before process termination.
+- A user page fault terminates only the faulting process instead of entering the global Kernel Panic path.
+- Process teardown is handed to the existing scheduler via `thread_exit()` after `process_exit()`.
+- Kernel-mode page faults and all other CPU exceptions remain fatal and use the existing 30-second diagnostic reboot path.
+- Preserved capture-only hardware IRQ architecture; no scheduler work was added to IRQ handlers.
+
 ## 0.5.18 — Enstein — Private process address spaces
 
 - Added per-process private CR3/page-table roots.

@@ -84,7 +84,7 @@ int nexus_elf_load_process(uint64_t pid, const char *path) {
     int load_count = 0;
 
     nexus_process_t *proc = process_get(pid);
-    if (!proc || proc->state == PROCESS_EXITED || proc->user_page_count != 0) return 0;
+    if (!proc || proc->state == PROCESS_ZOMBIE || proc->user_page_count != 0) return 0;
     if (!path || !fat32_read_file(path, file, sizeof(file), &file_size)) return 0;
     if (file_size < sizeof(elf64_ehdr_t)) return 0;
     if (eh->ident[0] != 0x7F || eh->ident[1] != 'E' || eh->ident[2] != 'L' || eh->ident[3] != 'F' ||

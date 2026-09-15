@@ -12,7 +12,7 @@ OBJCOPY ?= objcopy
 
 BUILD  := build
 ISODIR := iso
-NEXUS_VERSION ?= 0.5.18
+NEXUS_VERSION ?= 0.5.24
 ISO_IMAGE := $(BUILD)/NexusOS-$(NEXUS_VERSION).iso
 
 # -----------------------------------------------------------------------------

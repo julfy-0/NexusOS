@@ -2,7 +2,13 @@
 #define NEXUSOS_SYSCALL_H
 #include <stdint.h>
 
-enum { NEXUS_SYS_NOP = 0, NEXUS_SYS_EXIT = 1, NEXUS_SYS_GETPID = 2 };
+enum {
+    NEXUS_SYS_NOP = 0,
+    NEXUS_SYS_EXIT = 1,
+    NEXUS_SYS_GETPID = 2,
+    NEXUS_SYS_WRITE = 3,
+    NEXUS_SYS_CLOSE = 4
+};
 
 /* User ABI for the temporary INT 0x80 entry path:
  *   RAX = syscall number

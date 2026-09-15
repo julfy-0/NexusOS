@@ -151,7 +151,15 @@ static void reap_zombies(void) {
      * no longer active when this function runs. TID 0 has no heap stack. */
     for (uint32_t i = 1; i < SCHED_MAX_THREADS; i++) {
         nexus_tcb_t *thread = &g_tcbs[i];
-        if (thread->magic != THREAD_MAGIC || thread->state != THREAD_ZOMBIE) continue;
+        if (thread == g_current || thread->magic != THREAD_MAGIC || thread->state != THREAD_ZOMBIE) continue;
+
+        /* Process resources are released only after the scheduler has moved
+         * away from the zombie TCB. This makes CR3/page-table destruction safe
+         * even when the process exited from a syscall or page-fault handler. */
+        if (thread->process_pid != 0 &&
+            !process_reap(thread->process_pid, thread->id)) {
+            continue;
+        }
 
         if (thread->stack_base != 0) kfree((void *)(uintptr_t)thread->stack_base);
         thread->stack_base = 0;
@@ -174,7 +182,7 @@ static nexus_tcb_t *pick_next(void) {
 static void user_process_bootstrap(void *arg) {
     uint64_t pid = (uint64_t)(uintptr_t)arg;
     if (!usermode_enter(pid)) {
-        (void)process_exit(pid);
+        (void)process_exit_with_code(pid, 0, 2);
     }
     thread_exit();
 }
@@ -377,11 +385,15 @@ void scheduler_process(void) {
 
     nexus_tcb_t *next = pick_next();
     if (next == NULL) {
-        /* Keep the current execution context runnable if there is nobody else
-         * to run. This is the idle-safe path for the fixed scheduler. */
-        old->state = THREAD_RUNNING;
+        /* A terminating thread must never be revived merely because the ready
+         * queue is empty. Keep the old context only when it is still runnable. */
+        if (old->state == THREAD_READY) {
+            old->state = THREAD_RUNNING;
+            irq_restore(flags);
+            return;
+        }
         irq_restore(flags);
-        return;
+        for (;;) __asm__ volatile ("cli; hlt");
     }
 
     if (next == old) {
@@ -400,7 +412,7 @@ void scheduler_process(void) {
     uint64_t next_cr3 = paging_kernel_cr3();
     if (next->process_pid != 0) {
         nexus_process_t *np = process_get(next->process_pid);
-        if (np && np->state != PROCESS_EXITED && np->address_space_cr3 != 0) {
+        if (np && np->state != PROCESS_ZOMBIE && np->address_space_cr3 != 0) {
             next_cr3 = np->address_space_cr3;
             process_set_current(np->pid);
         } else {
@@ -472,7 +484,7 @@ uint64_t thread_create_user_process(uint64_t pid) {
     if (!g_ready || pid == 0 || !heap_is_ready() || !usermode_ready()) return 0;
 
     nexus_process_t *process = process_get(pid);
-    if (!process || process->state == PROCESS_EXITED || process->scheduler_thread_id != 0) return 0;
+    if (!process || process->state == PROCESS_ZOMBIE || process->scheduler_thread_id != 0) return 0;
 
     uint64_t tid = thread_create(user_process_bootstrap, (void *)(uintptr_t)pid);
     if (tid == 0) return 0;

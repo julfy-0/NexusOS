@@ -2,6 +2,7 @@
  * Векторы 0-31: исключения CPU (паникуем и виснем).
  * Векторы 32-47: IRQ0-15 от PIC (обрабатываем нужные, шлём EOI). */
 #include <stdint.h>
+#include <stddef.h>
 #include "idt.h"
 #include "gdt.h"
 #include "console.h"
@@ -13,6 +14,7 @@
 #include "xhci.h"
 #include "event_queue.h"
 #include "scheduler.h"
+#include "process.h"
 
 typedef struct {
     uint16_t offset_low;
@@ -163,6 +165,29 @@ static void panic_screen(interrupt_frame_t *f) {
 
 void isr_handler(interrupt_frame_t *frame) {
     if (frame->vector < 32) {
+        /* A page fault taken from CPL3 belongs to the current user process.
+         * It is recoverable at the process boundary: report the fault, tear
+         * down only that process address space, and let the scheduler select
+         * another runnable TCB. Kernel-mode faults remain fatal. */
+        if (frame->vector == 14 && (frame->cs & 3ULL) == 3ULL) {
+            nexus_process_t *process = process_current();
+            print_page_fault_details(frame);
+            if (process != NULL && process->scheduler_thread_id != 0 &&
+                process->state != PROCESS_ZOMBIE) {
+                uint64_t pid = process->pid;
+                console_print("\n  User process PID ");
+                console_print_dec(pid);
+                console_print(" terminated due to page fault.\n");
+                if (process_exit(pid)) {
+                    thread_exit();
+                }
+            }
+            /* If there is no scheduler-owned process to terminate, do not
+             * return to the faulting CPL3 frame. Fall back to the kernel panic
+             * path rather than executing arbitrary user state. */
+            panic_countdown_and_reboot();
+        }
+
         panic_screen(frame);
         panic_countdown_and_reboot();
     }

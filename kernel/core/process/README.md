@@ -17,7 +17,9 @@ Implemented API:
 - `process_create()`
 - `process_get()`
 - `process_set_current()` / `process_current()`
-- `process_exit()`
+- `process_exit()` / `process_exit_with_code()`
+- `process_reap()`
+- `process_zombie_count()`
 - `process_reserve_user_range()`
 
 Not implemented in this block:
@@ -33,3 +35,14 @@ Those are deliberately separate follow-up blocks of milestone 0.5.4.
 
 ### 0.5.17
 Processes may be owned by a scheduler TCB through `scheduler_thread_id`. User process termination clears the process state before the scheduler reclaims the kernel thread stack.
+
+
+### Lifecycle (0.5.20)
+
+Processes now use a two-phase termination lifecycle. `process_exit()` marks a
+process as `PROCESS_ZOMBIE` and records its exit metadata, but does not destroy
+the currently active CR3 or user pages. The scheduler-owned TCB is then marked
+zombie by `thread_exit()`. Once a different TCB is running, the scheduler calls
+`process_reap()` to release user mappings, destroy the private address space and
+return the process slot to `PROCESS_UNUSED`. PIDs are therefore not reused while
+a process is still a zombie.

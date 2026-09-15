@@ -17,7 +17,7 @@ int usermode_prepare(uint64_t pid, uint64_t entry,
     if (!ready || entry == 0 || user_stack == 0 || kernel_stack == 0)
         return 0;
     p = process_get(pid);
-    if (!p || p->state == PROCESS_EXITED)
+    if (!p || p->state == PROCESS_ZOMBIE)
         return 0;
     p->user_entry = entry;
     p->user_stack_base = user_stack;
@@ -31,7 +31,7 @@ int usermode_enter(uint64_t pid) {
     nexus_process_t *p;
     if (!ready) return 0;
     p = process_get(pid);
-    if (!p || p->state == PROCESS_EXITED ||
+    if (!p || p->state == PROCESS_ZOMBIE ||
         (p->flags & PROCESS_FLAG_USER_CONTEXT) == 0 ||
         p->user_entry == 0 || p->user_stack_base == 0 || p->kernel_stack == 0)
         return 0;

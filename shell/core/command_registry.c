@@ -219,6 +219,7 @@ static void command_elf_run(char *args) {
         console_print(args);
         console_print("\n");
         (void)process_exit(pid);
+        (void)process_reap(pid, 0);
         return;
     }
 
@@ -226,6 +227,7 @@ static void command_elf_run(char *args) {
     if (!tid) {
         console_print("elf-run: unable to create scheduler thread\n");
         (void)process_exit(pid);
+        (void)process_reap(pid, 0);
         return;
     }
 
@@ -234,6 +236,7 @@ static void command_elf_run(char *args) {
                                 p->user_stack_base, p->kernel_stack)) {
         console_print("elf-run: unable to prepare user context\n");
         (void)process_exit(pid);
+        (void)process_reap(pid, 0);
         return;
     }
 

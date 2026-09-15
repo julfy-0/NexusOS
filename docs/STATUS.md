@@ -1,4 +1,4 @@
-# NexusOS 0.5.18 — Enstein
+# NexusOS 0.5.23 — Enstein
 
 ## App Manager Foundation
 
@@ -78,3 +78,40 @@ NexusOS 0.5.17 adds the first user-visible syscall entry path through `INT 0x80`
 NexusOS 0.5.18 gives each process a private copy of the kernel page-table hierarchy. User mappings are created only in that process CR3, and the scheduler switches CR3 together with the scheduler TCB. User image initialization no longer relies on the active kernel virtual address for the destination; it writes through the process page-table translation into the physical user pages.
 
 The kernel identity map remains available in each address space so existing kernel code and hardware mappings continue to work. The higher-half kernel remains intentionally deferred.
+
+
+## User Page-Fault Isolation
+
+NexusOS 0.5.20 treats a page fault taken while executing a scheduler-owned Ring-3 process as a process-local failure. The handler prints the fault address and error-code details, terminates the current process, and transfers ownership back to the scheduler. Kernel-mode page faults remain fatal.
+
+
+## 0.5.21 — Syscall Validation and Ring-3 ABI Hardening
+
+NexusOS 0.5.21 hardens the tested `INT 0x80` user ABI. Syscalls now require a
+valid scheduler-owned Ring-3 process, and the saved return frame is validated
+before NexusOS executes `IRETQ`. The user instruction pointer must reference a
+mapped executable page and the user stack pointer must reference mapped writable
+memory. Invalid contexts are rejected without changing scheduler ownership.
+
+
+## 0.5.22 — Safe userspace memory access
+
+NexusOS 0.5.22 adds explicit bounded userspace memory-access helpers for future syscall arguments and kernel services. Kernel writes now have a dedicated path that requires writable user mappings, while kernel reads validate the complete userspace range before translating each page through the process private CR3. Existing ELF initialization keeps its lower-level loader path so executable read-only pages can still be populated safely before userspace starts.
+
+
+## 0.5.23 — Userspace console write syscall
+
+NexusOS 0.5.23 extends the validated `INT 0x80` ABI with a bounded,
+non-blocking userspace console write operation. The syscall accepts stdout or
+stderr, validates the complete userspace buffer through the process private
+CR3, copies it into a bounded kernel buffer, and emits the bytes through the
+existing console path.
+
+
+## 0.5.24 — Per-process file descriptor foundation
+
+NexusOS 0.5.24 adds a fixed per-process descriptor table as the kernel-side
+foundation for userspace file I/O. Every process receives stdin/stdout/stderr
+entries, the existing `WRITE` syscall resolves output through that table, and
+`CLOSE` can disable an open descriptor. Descriptor state is reset during safe
+process reaping; VFS-backed file objects and blocking stdin remain future work.

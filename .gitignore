@@ -1,6 +1,5 @@
 build/
 iso/
-old/
 *.o
 *.efi
 *.elf
@@ -8,3 +7,4 @@ old/
 *.iso
 *.tar.gz
 *.zip
+/old
