@@ -2,6 +2,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "heap.h"
+#include "process.h"
+#include "usermode.h"
+#include "paging.h"
 
 #define SCHED_MAX_THREADS NEXUS_SCHEDULER_MAX_THREADS
 #define SCHED_STACK_SIZE 16384u
@@ -19,6 +22,7 @@ typedef struct nexus_tcb {
     uint64_t stack_base;
     uint64_t stack_size;
     uint64_t id;
+    uint64_t process_pid;
     uint64_t switches;
     uint64_t runtime_ticks;
     uint64_t wake_tick;
@@ -167,6 +171,14 @@ static nexus_tcb_t *pick_next(void) {
     return ready_pop();
 }
 
+static void user_process_bootstrap(void *arg) {
+    uint64_t pid = (uint64_t)(uintptr_t)arg;
+    if (!usermode_enter(pid)) {
+        (void)process_exit(pid);
+    }
+    thread_exit();
+}
+
 static void thread_bootstrap(void) {
     __asm__ volatile ("sti" ::: "memory");
     nexus_tcb_t *thread = g_current;
@@ -300,6 +312,7 @@ void scheduler_init(uint32_t timer_hz) {
     __asm__ volatile ("mov %%rsp, %0" : "=r"(rsp));
     g_current->magic = THREAD_MAGIC;
     g_current->id = 0;
+    g_current->process_pid = 0;
     g_current->rsp = rsp;
     g_current->stack_base = 0;
     g_current->stack_size = 0;
@@ -379,6 +392,29 @@ void scheduler_process(void) {
 
     next->state = THREAD_RUNNING;
     g_current = next;
+
+    /* Address-space ownership follows the scheduler TCB. Kernel threads use
+     * the permanent kernel CR3; user threads use their private process CR3.
+     * Switch CR3 before handing over the kernel stack so a resumed thread
+     * never executes under another process's address space. */
+    uint64_t next_cr3 = paging_kernel_cr3();
+    if (next->process_pid != 0) {
+        nexus_process_t *np = process_get(next->process_pid);
+        if (np && np->state != PROCESS_EXITED && np->address_space_cr3 != 0) {
+            next_cr3 = np->address_space_cr3;
+            process_set_current(np->pid);
+        } else {
+            next->state = THREAD_ZOMBIE;
+            g_current = old;
+            old->state = THREAD_RUNNING;
+            irq_restore(flags);
+            return;
+        }
+    } else {
+        process_clear_current();
+    }
+    (void)paging_switch_cr3(next_cr3);
+
     old->switches++;
     next->switches++;
     g_context_switches++;
@@ -412,6 +448,7 @@ uint64_t thread_create(void (*entry)(void *), void *arg) {
 
     slot->magic = THREAD_MAGIC;
     slot->id = g_next_tid++;
+    slot->process_pid = 0;
     slot->stack_base = (uint64_t)(uintptr_t)stack;
     slot->stack_size = SCHED_STACK_SIZE;
     slot->switches = 0;
@@ -429,6 +466,30 @@ uint64_t thread_create(void (*entry)(void *), void *arg) {
     uint64_t id = slot->id;
     irq_restore(flags);
     return id;
+}
+
+uint64_t thread_create_user_process(uint64_t pid) {
+    if (!g_ready || pid == 0 || !heap_is_ready() || !usermode_ready()) return 0;
+
+    nexus_process_t *process = process_get(pid);
+    if (!process || process->state == PROCESS_EXITED || process->scheduler_thread_id != 0) return 0;
+
+    uint64_t tid = thread_create(user_process_bootstrap, (void *)(uintptr_t)pid);
+    if (tid == 0) return 0;
+
+    /* thread_create owns the kernel stack; expose its top through the TCB so
+     * CPL3 -> CPL0 gates can use the same stack via TSS.RSP0. */
+    for (uint32_t i = 1; i < SCHED_MAX_THREADS; ++i) {
+        if (g_tcbs[i].magic == THREAD_MAGIC && g_tcbs[i].id == tid) {
+            g_tcbs[i].process_pid = pid;
+            process->kernel_stack = g_tcbs[i].stack_base + g_tcbs[i].stack_size;
+            process->scheduler_thread_id = tid;
+            process->flags |= PROCESS_FLAG_SCHEDULER_OWNED;
+            return tid;
+        }
+    }
+
+    return 0;
 }
 
 void thread_yield(void) {

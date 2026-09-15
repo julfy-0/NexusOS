@@ -14,9 +14,9 @@ int nexus_system_init(void) {
     nexus_power_init();
     nexus_system_info_init();
     nexus_app_manager_init();
-    nexus_app_register(&(nexus_app_t){"nexus.files", "Files", "builtin:files", 1});
-    nexus_app_register(&(nexus_app_t){"nexus.terminal", "Terminal", "builtin:terminal", 1});
-    nexus_app_register(&(nexus_app_t){"nexus.settings", "Settings", "builtin:settings", 1});
+    nexus_app_register_builtin("nexus.files", "Files", "builtin:files");
+    nexus_app_register_builtin("nexus.terminal", "Terminal", "builtin:terminal");
+    nexus_app_register_builtin("nexus.settings", "Settings", "builtin:settings");
     nexus_package_manager_init();
     nexus_system_set_state(NEXUS_SYSTEM_CLI);
     return 1;

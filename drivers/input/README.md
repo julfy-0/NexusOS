@@ -1,39 +1,26 @@
 # NexusOS Input Drivers
 
-This directory contains the low-level input drivers used by the kernel.
+## Unified input core
+
+`core/input.c` records input by source (`PS/2` or `USB HID`) and device class
+(keyboard or mouse). It is intentionally a small common layer: existing shell and
+GUI APIs remain unchanged, so PS/2 and USB devices feed the same higher-level state.
 
 ## Keyboard
 
-`keyboard/keyboard.c` implements an i8042/PS/2 keyboard driver using translated
-Set-1 scancodes. It handles:
-
-- normal ASCII keys and Shift
-- Caps Lock, Num Lock and Scroll Lock state
-- keyboard LEDs
-- Ctrl and Alt modifier state
-- E0 extended keys and cursor/navigation keys
-- IRQ1 delivery to the shell/GUI
+The PS/2 i8042 keyboard supports modifiers, locks, LEDs, extended keys and deferred
+IRQ processing. xHCI additionally supports USB HID Boot Protocol keyboards.
 
 ## Mouse
 
-`mouse/mouse.c` implements the i8042 auxiliary PS/2 mouse port. It supports:
+The PS/2 mouse supports 3/4-byte packets, wheel detection and framebuffer clamping.
+xHCI now also accepts USB HID Boot Protocol mouse reports and feeds movement, buttons
+and wheel data into the same mouse state used by the GUI.
 
-- IRQ12 delivery
-- standard 3-byte packets
-- automatic IntelliMouse wheel detection
-- 4-byte wheel packets
-- left/right/middle and extra button bits
-- signed movement and overflow rejection
-- framebuffer-sized coordinate clamping
+## Event model
 
-## Current USB status
+Hardware IRQ handlers remain capture-only. PS/2 bytes enter the kernel event queue;
+xHCI transfer completion is polled from normal kernel context on timer events. No
+scheduler context switch or GUI work is performed directly inside an IRQ handler.
 
-NexusOS already has an xHCI HID boot-keyboard path under `drivers/usb/`.
-The PS/2 drivers here are independent and remain useful on legacy/virtualized
-machines. USB HID mouse support is a separate next step because it requires
-USB HID enumeration and an interrupt-IN endpoint for the mouse interface.
-
-## Debugging
-
-Use the shell command `inputinfo` after boot to inspect keyboard modifier/lock
-state and the mouse position/button/wheel capability.
+Use `inputinfo` to inspect PS/2/USB availability and input event counters.

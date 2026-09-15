@@ -122,6 +122,14 @@ void vfs_init(void) {
 }
 
 int vfs_mkdir(const char *name) {
+    char candidate[256], mountpoint[256], rel[256];
+    path_join(candidate, g_cwd_path, name);
+    int mi = path_is_mount(candidate, mountpoint);
+    const vfs_mount_t *m = mi >= 0 ? vfs_mount_get(mi) : 0;
+    if (m && strcmp(m->fstype, "fat32") == 0 && fat32_is_mounted() &&
+        !(m->flags & VFS_MOUNT_RDONLY) && fat_relative(candidate, mountpoint, rel))
+        return fat32_mkdir(rel) ? 0 : -1;
+
     if (g_cwd < 0) return -1;
     if (name[0] == '\0') return -1;
     if (find_child(g_cwd, name) != -1) return -1;
@@ -136,6 +144,14 @@ int vfs_mkdir(const char *name) {
 }
 
 int vfs_touch(const char *name) {
+    char candidate[256], mountpoint[256], rel[256];
+    path_join(candidate, g_cwd_path, name);
+    int mi = path_is_mount(candidate, mountpoint);
+    const vfs_mount_t *m = mi >= 0 ? vfs_mount_get(mi) : 0;
+    if (m && strcmp(m->fstype, "fat32") == 0 && fat32_is_mounted() &&
+        !(m->flags & VFS_MOUNT_RDONLY) && fat_relative(candidate, mountpoint, rel))
+        return fat32_write_file(rel, 0, 0) ? 0 : -1;
+
     if (g_cwd < 0) return -1;
     if (name[0] == '\0') return -1;
     if (find_child(g_cwd, name) != -1) return -1;
@@ -294,6 +310,17 @@ void vfs_cat(const char *name) {
 }
 
 int vfs_write(const char *name, const char *content) {
+    char candidate[256], mountpoint[256], rel[256];
+    path_join(candidate, g_cwd_path, name);
+    int mi = path_is_mount(candidate, mountpoint);
+    const vfs_mount_t *m = mi >= 0 ? vfs_mount_get(mi) : 0;
+    if (m && strcmp(m->fstype, "fat32") == 0 && fat32_is_mounted() &&
+        !(m->flags & VFS_MOUNT_RDONLY) && fat_relative(candidate, mountpoint, rel)) {
+        if (!content) return -1;
+        int len = local_strlen(content);
+        return fat32_write_file(rel, content, (unsigned int)len) ? 0 : -1;
+    }
+
     if (g_cwd < 0) return -1;
     int idx = find_child(g_cwd, name);
 
@@ -345,6 +372,16 @@ const char *vfs_get_content(const char *name) {
         return 0;
     }
     return g_nodes[idx].content;
+}
+
+int vfs_read(const char *name, char *buffer, int capacity) {
+    if (!buffer || capacity <= 0) return -1;
+    const char *content = vfs_get_content(name);
+    if (!content) { buffer[0] = '\0'; return -1; }
+    int i = 0;
+    while (content[i] && i < capacity - 1) { buffer[i] = content[i]; i++; }
+    buffer[i] = '\0';
+    return i;
 }
 
 char *vfs_split_word(char *s) {

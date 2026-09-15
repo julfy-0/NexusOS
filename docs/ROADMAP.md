@@ -9,8 +9,12 @@ descent — импортированный проект принёс "archive" (
 
 ## NexusOS 0.5.2 → 0.6.0 master plan
 
-This is the active development roadmap. The current rollback baseline is **0.5.3**;
-0.5.3.6 is the active process-safe event integration milestone.
+This is the active development roadmap. The current release baseline is **0.5.18 — Enstein**;
+0.5.4 — Processes & Userspace Foundation is complete as a foundation milestone.
+0.5.5 — Shell & I/O Foundation is integrated.
+0.5.6 — Unified Input & USB HID is integrated.
+0.5.7 — GUI / Window System 2.0 is complete.
+0.5.10 — App Manager Foundation and 0.5.12 — Application Discovery are completed milestones.
 
 ### 0.5.2 — Memory & execution foundation
 
@@ -61,59 +65,152 @@ Rollback baseline: `0.5.3`; interrupt/event queue, scheduler, synchronization an
   - [x] Broadcast wakeup of event waiters
   - [x] No scheduler mutation or context switching from IRQ handlers
 
-### 0.5.4 — Processes & user execution
+### 0.5.4 — Processes & Userspace Foundation
 
-- [ ] Process/address-space abstraction
-- [ ] TSS and ring-3 transition
+- [x] 0.5.4.1 — Process & address-space foundation
+  - [x] Fixed process table and stable PID allocation
+  - [x] Process lifecycle states and current-process metadata
+  - [x] Future CR3 ownership metadata
+  - [x] Reserved user virtual-range metadata
+- [x] 0.5.4.2 — TSS and ring-3 transition foundation
+  - [x] Ring-3 GDT selectors and TSS.RSP0 contract
+  - [x] IRETQ transition trampoline
+  - [x] Per-process user execution context metadata
 - [ ] User/kernel memory permissions
 - [ ] Syscall ABI
 - [ ] ELF user loader
+- [x] 0.5.4 — User/Kernel Memory Permissions & Address Space Activation
+  - [x] PMM-backed 4 KiB user pages mapped with U/S permissions
+  - [x] Per-process user mapping ownership and cleanup
+  - [x] Active CR3 recorded explicitly (private CR3 remains future work)
+
 - [ ] `init` process
 
-### 0.5.5 — Real shell & filesystem I/O
+### 0.5.5 — Shell & filesystem I/O
+
+- [x] Robust argument parser and quoting
+- [x] Escape sequences
+- [x] `&&` and `;`
+- [x] Parser recognition for `>`, `>>`, `<` and `|`
+
+Pipelines and redirection now execute through bounded console-output capture and
+the existing VFS. File descriptors and persistent writable FAT32 remain future work.
+
+### 0.5.5 remaining
 
 - [ ] User-space shell process
-- [ ] Robust argument parser and quoting
-- [ ] Escape sequences
-- [ ] `>`, `>>`, `<` redirection
-- [ ] Pipelines (`|`)
-- [ ] `&&` and `;`
-- [ ] Exit/status codes
-- [ ] File descriptors
-- [ ] Writable FAT32 integration
+- [x] Robust argument parser and quoting
+- [x] Escape sequences
+- [x] `>`, `>>`, `<` redirection through VFS
+- [x] Pipelines (`|`) through bounded shell I/O transport
+- [x] `&&` and `;`
+- [x] Shell command success/failure status for control flow
+- [ ] Per-process file descriptors
+- [ ] Writable persistent FAT32 integration
 
 ### 0.5.6 — Unified input & USB HID
 
-- [ ] USB HID abstraction
-- [ ] USB keyboard input
-- [ ] USB mouse input
-- [ ] Unified PS/2 + USB input API
-- [ ] Event-based GUI input
+- [x] USB HID boot abstraction on xHCI
+- [x] USB keyboard input
+- [x] USB mouse input
+- [x] Unified PS/2 + USB input API
+- [x] Event-based GUI input remains deferred to normal kernel context
 
 ### 0.5.7 — GUI / Window System 2.0
 
-- [ ] Window abstraction
-- [ ] Window bounds/title/focus/visibility
-- [ ] Active window management
-- [ ] Close button/events
-- [ ] Desktop integration
-- [ ] Application launching foundation
+- [x] Window abstraction
+- [x] Window bounds/title/focus/visibility
+- [x] Active window management
+- [x] Close button/events
+- [x] Mouse title-bar dragging
+- [x] Desktop integration
+- [x] Application launching foundation
 
-### 0.5.8 — Nexus system services
+### 0.5.9 — Nexus system services
 
-- [ ] `init` service/session architecture
-- [ ] App registry
-- [ ] `.nx` package specification
-- [ ] `manifest.nxm` parser
-- [ ] Basic Package Manager discovery/metadata
+- [x] `init` service/session architecture foundation
+- [x] App registry
+- [x] `.nx` package specification foundation
+- [x] `manifest.nxm` parser
+- [x] Basic Package Manager metadata foundation
 - [ ] App Manager foundation
 - [ ] `/system/apps` and `/userdata/apps` integration
 - [ ] Font abstraction while retaining bitmap font
 - [ ] Asset abstraction
 
+### 0.5.10 — App Manager Foundation
+
+- [x] Central application registry
+- [x] Stable application IDs and descriptors
+- [x] Built-in application registration API
+- [x] Application source classification (`builtin`, `system`, `userdata`)
+- [x] Application lifecycle state (`stopped` / `running`)
+- [x] Active application tracking
+- [x] Launch counters and runtime inspection
+- [x] `/system/apps` read-only discovery
+- [x] `/userdata/apps` read-only discovery
+- [ ] Writable package installation
+- [ ] ELF/user-space application execution
+
+### 0.5.12 — Writable FAT32 Foundation
+
+- [x] AHCI `WRITE DMA EXT` sector write path
+- [x] FAT32 cluster allocation and freeing
+- [x] Mirrored FAT updates
+- [x] 8.3 file creation and overwrite
+- [x] 8.3 directory creation
+- [x] Writable FAT32 mount at `/mnt/disk0`
+- [x] VFS routing for FAT32 `mkdir`, `touch`, and `write`
+- [x] Package installation transaction
+- [ ] ELF/user-space application execution
+
+### 0.5.13 — Package Installation Transaction
+
+- [x] Package manifest validation before mutation
+- [x] Staged application directory creation
+- [x] Bounded Entry payload copy
+- [x] Manifest-last publication/commit point
+- [x] Rollback of newly created payload and directory on failure
+- [x] Immediate post-install application discovery
+- [ ] Multi-file package extraction
+- [ ] Long filename package support
+- [x] ELF/user-space loader foundation
+
+### 0.5.15 — ELF64 user-space loader foundation
+
+- [x] ELF64 header/program-header validation for x86_64
+- [x] `PT_LOAD` image loading with zero-filled BSS
+- [x] Per-page user permissions (`U/S`, writable, NX)
+- [x] Fixed-size user image + stack page ownership
+- [x] ET_EXEC and ET_DYN load support
+- [x] `elf-run <path>` synchronous Ring-3 execution path
+- [x] Syscall entry/return path
+- [ ] Scheduler-owned user processes
+- [ ] Private CR3 per process
+
+### 0.5.17 — Syscall entry/return foundation
+
+- [x] DPL3 `INT 0x80` syscall gate
+- [x] x86_64 syscall entry stub preserving all GPRs
+- [x] User return-frame validation
+- [x] `NOP` syscall
+- [x] `GETPID` syscall
+- [ ] Scheduler-owned user process termination
+- [ ] `EXIT` syscall completion
+
+### 0.5.14 — Multi-file package payload
+
+- [x] Manifest `Files` list for multiple package payloads
+- [x] 8.3 payload-name validation
+- [x] Preflight validation of every payload before destination mutation
+- [x] Multi-file staged copy with rollback
+- [x] Manifest-last publication remains the commit point
+- [ ] Long filename package support
+- [ ] ELF/user-space execution
+
 ### 0.5.9 — Networking & security foundation
 
-- [ ] Ethernet/NIC foundation
+- [x] Ethernet/NIC foundation (Intel E1000 detection, PCI/MMIO binding, MAC discovery)
 - [ ] ARP
 - [ ] IPv4
 - [ ] ICMP
@@ -217,3 +314,14 @@ complete. At that point the block receives a GitHub Release description.
 - Application surface: Files / Terminal / Settings cards; window manager and mouse are next.
 - Ring-3 foundation: user code/data selectors and 64-bit TSS with rsp0.
 - Next: 4 KiB user pages with U/S permission, syscall entry, process object, scheduler, ELF user loader.
+
+
+### 0.5.18 — Private process address spaces
+
+- [x] Private CR3 allocated per process
+- [x] Private page-table hierarchy cloned from the kernel address space
+- [x] 4 KiB user mappings installed in the owning process CR3
+- [x] Scheduler CR3 switch coupled to process TCB ownership
+- [x] User ELF image/stack initialization through process translations
+- [ ] Copy-on-write / shared memory
+- [ ] Page-fault-driven demand mapping

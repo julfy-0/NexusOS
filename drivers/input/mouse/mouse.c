@@ -12,6 +12,7 @@
 #include "mouse.h"
 #include "io.h"
 #include "event_queue.h"
+#include "input.h"
 
 #define PS2_DATA       0x60
 #define PS2_STATUS     0x64
@@ -165,6 +166,7 @@ void mouse_init(void) {
     if (!mouse_write_byte(0xF4)) return;
 
     g_present = 1;
+    input_set_present(NEXUS_INPUT_SOURCE_PS2, NEXUS_INPUT_DEVICE_MOUSE, 1);
     g_x = (int32_t)(g_w / 2u);
     g_y = (int32_t)(g_h / 2u);
     g_packet_index = 0;
@@ -218,6 +220,7 @@ int mouse_process_byte(uint8_t b) {
     g_x = nx;
     g_y = ny;
     g_buttons = new_buttons;
+    input_record_mouse(NEXUS_INPUT_SOURCE_PS2, dx, -dy, new_buttons, g_wheel);
     return 1;
 }
 
@@ -252,3 +255,19 @@ int8_t mouse_get_wheel(void) { return g_wheel; }
 int mouse_has_wheel(void) { return g_packet_len == 4; }
 void mouse_clear_moved(void) { g_moved = 0; }
 void mouse_clear_wheel(void) { g_wheel = 0; }
+
+void mouse_process_usb_report(const uint8_t *report, uint8_t length) {
+    if (!report || length < 3) return;
+    uint8_t buttons = report[0] & 0x07;
+    int8_t dx = (int8_t)report[1];
+    int8_t dy = (int8_t)report[2];
+    int8_t wheel = length >= 4 ? (int8_t)report[3] : 0;
+    int32_t nx = clamp_coord((int64_t)g_x + dx, g_w);
+    int32_t ny = clamp_coord((int64_t)g_y - dy, g_h);
+    if (nx != g_x || ny != g_y || buttons != g_buttons) g_moved = 1;
+    g_x = nx; g_y = ny; g_buttons = buttons;
+    if (wheel) g_wheel = (int8_t)(g_wheel + wheel);
+    g_present = 1;
+    input_set_present(NEXUS_INPUT_SOURCE_USB, NEXUS_INPUT_DEVICE_MOUSE, 1);
+    input_record_mouse(NEXUS_INPUT_SOURCE_USB, dx, -dy, buttons, wheel);
+}

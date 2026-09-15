@@ -10,6 +10,7 @@
 #include "console.h"
 #include "io.h"
 #include "event_queue.h"
+#include "input.h"
 
 #define KBD_DATA_PORT    0x60
 #define KBD_STATUS_PORT  0x64
@@ -124,6 +125,7 @@ void keyboard_init(void) {
     keyboard_set_leds();
     flush_output_buffer();
     g_present = 1;
+    input_set_present(NEXUS_INPUT_SOURCE_PS2, NEXUS_INPUT_DEVICE_KEYBOARD, 1);
 }
 
 static void dispatch_special(uint8_t sc, int released) {
@@ -183,6 +185,8 @@ void keyboard_process_scancode(uint8_t sc) {
     }
 
     if (c == 0) return;
+
+    input_record_keyboard(NEXUS_INPUT_SOURCE_PS2, (uint8_t)c);
 
     int was_gui = gui_is_active();
     if (was_gui) {

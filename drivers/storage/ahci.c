@@ -258,3 +258,52 @@ int ahci_read_sectors(uint64_t lba, uint32_t count, void *buf) {
 
     return 1;
 }
+
+
+int ahci_write_sectors(uint64_t lba, uint32_t count, const void *buf) {
+    if (!g_ready || !buf || count == 0 || count > 128) return 0;
+
+    volatile hba_port_t *port = &g_hba->ports[g_port_index];
+    if (!wait_while(&port->tfd, PXTFD_BSY | PXTFD_DRQ)) return 0;
+
+    hba_cmd_header_t *hdr = (hba_cmd_header_t *)g_port_clb;
+    hdr->dw0 = 5u | (1u << 16);
+    hdr->prdbc = 0;
+    hdr->ctba = (uint32_t)(uintptr_t)g_cmd_table;
+    hdr->ctbau = 0;
+
+    hba_cmd_table_t *tbl = (hba_cmd_table_t *)g_cmd_table;
+    memset(tbl, 0, sizeof(hba_cmd_table_t));
+    tbl->prdt[0].dba = (uint32_t)(uintptr_t)buf;
+    tbl->prdt[0].dbau = 0;
+    tbl->prdt[0].dbc_ic = (count * 512u - 1u) & 0x3FFFFFu;
+
+    uint8_t *fis = tbl->cfis;
+    fis[0] = 0x27; /* Register FIS */
+    fis[1] = 0x80; /* C=1 */
+    fis[2] = 0x35; /* WRITE DMA EXT */
+    fis[3] = 0;
+    fis[4] = (uint8_t)(lba & 0xFF);
+    fis[5] = (uint8_t)((lba >> 8) & 0xFF);
+    fis[6] = (uint8_t)((lba >> 16) & 0xFF);
+    fis[7] = 0x40;
+    fis[8] = (uint8_t)((lba >> 24) & 0xFF);
+    fis[9] = (uint8_t)((lba >> 32) & 0xFF);
+    fis[10] = (uint8_t)((lba >> 40) & 0xFF);
+    fis[11] = 0;
+    fis[12] = (uint8_t)(count & 0xFF);
+    fis[13] = (uint8_t)((count >> 8) & 0xFF);
+    fis[14] = 0;
+    fis[15] = 0;
+
+    port->is = 0xFFFFFFFFu;
+    port->ci |= 1u;
+
+    for (uint32_t i = 0; i < SPIN_LIMIT; i++) {
+        if (port->is & PXIS_TFES) return 0;
+        if (!(port->ci & 1u)) break;
+        if (i == SPIN_LIMIT - 1) return 0;
+    }
+
+    return (port->tfd & PXTFD_ERR) ? 0 : 1;
+}

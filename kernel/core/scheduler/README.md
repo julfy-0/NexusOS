@@ -49,3 +49,7 @@ reclaimed.
 The scheduler exposes ready/sleeping counts in addition to the existing tick,
 quantum and context-switch counters. This keeps `meminfo` useful without
 walking internal scheduler lists.
+
+
+### User processes (0.5.17)
+`thread_create_user_process()` creates a scheduler-owned TCB for a process and assigns its kernel stack top to the process TSS.RSP0 contract. User entry is performed by the TCB bootstrap.

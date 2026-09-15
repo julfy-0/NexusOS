@@ -26,6 +26,11 @@
 #include "gpuinfo.h"
 #include "inputinfo.h"
 #include "uname.h"
+#include "elf_loader.h"
+#include "process.h"
+#include "usermode.h"
+#include "heap.h"
+#include "scheduler.h"
 
 #include "echo.h"
 #include "reverse.h"
@@ -194,6 +199,52 @@ static void command_umount(char *args) {
 
 static void command_mounts(char *args) { (void)args; vfs_mount_list(); }
 
+static void command_elf_run(char *args) {
+    if (!args || !args[0]) {
+        console_print("elf-run: missing ELF path\nusage: elf-run <path>\n");
+        return;
+    }
+    if (!usermode_ready() || !scheduler_is_ready()) {
+        console_print("elf-run: user mode or scheduler is not ready\n");
+        return;
+    }
+
+    uint64_t pid = process_create(0);
+    if (!pid) {
+        console_print("elf-run: process table is full\n");
+        return;
+    }
+    if (!nexus_elf_load_process(pid, args)) {
+        console_print("elf-run: invalid or unsupported ELF: ");
+        console_print(args);
+        console_print("\n");
+        (void)process_exit(pid);
+        return;
+    }
+
+    uint64_t tid = thread_create_user_process(pid);
+    if (!tid) {
+        console_print("elf-run: unable to create scheduler thread\n");
+        (void)process_exit(pid);
+        return;
+    }
+
+    nexus_process_t *p = process_get(pid);
+    if (!p || !usermode_prepare(pid, p->user_entry,
+                                p->user_stack_base, p->kernel_stack)) {
+        console_print("elf-run: unable to prepare user context\n");
+        (void)process_exit(pid);
+        return;
+    }
+
+    console_print("Queued user ELF (PID ");
+    console_print_dec(pid);
+    console_print(", TID ");
+    console_print_dec(tid);
+    console_print(")\n");
+    scheduler_request_reschedule();
+}
+
 static void command_desktop_run(char *args) {
     (void)args;
     console_print("Starting NexusOS " NEXUS_VERSION_DISPLAY " Desktop...\n\n");
@@ -290,6 +341,7 @@ static const command_entry_t g_commands[] = {
     ENTRY("help", "?", CMD_SHELL, "help [command|category]", "show command help", command_help)
     ENTRY("man", 0, CMD_SHELL, "man <command>", "show detailed command manual", command_man)
     ENTRY("desktop-run", 0, CMD_SHELL, "desktop-run", "start NexusOS Desktop", command_desktop_run)
+    ENTRY("elf-run", 0, CMD_SHELL, "elf-run <path>", "load and enter a user ELF64 executable", command_elf_run)
     ENTRY("beep", 0, CMD_SHELL, "beep", "beep the PC speaker", command_beep)
 
     /* Power */

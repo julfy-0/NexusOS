@@ -6,6 +6,8 @@
 #include "shell.h"
 #include "gui.h"
 #include "console.h"
+#include "mouse.h"
+#include "input.h"
 
 #define XHCI_CLASS      0x0C
 #define XHCI_SUBCLASS   0x03
@@ -75,6 +77,9 @@ static uint8_t g_ports;
 static uint8_t g_connected;
 static int g_ready;
 static int g_kbd_present;
+static int g_mouse_present;
+static uint8_t g_hid_protocol; /* 1 keyboard, 2 mouse */
+static uint8_t g_hid_report_len;
 
 static uint32_t g_op_base;      /* смещение operational-регистров от g_mmio */
 static uint32_t g_db_base;      /* смещение doorbell array */
@@ -450,7 +455,7 @@ static void process_boot_report(const uint8_t *report) {
 static void kbd_ring_push_normal(int index) {
     xhci_trb_t *trb = &g_kbd_ring[g_kbd_enq];
     trb->parameter = (uint64_t)(uintptr_t)g_kbd_reports[index];
-    trb->status = 8u; /* TRB Transfer Length */
+    trb->status = g_hid_report_len ? g_hid_report_len : 8u; /* HID boot report */
     trb->control = (trb->control & ~TRB_CYCLE);
     trb->control = TRB_SET_TYPE(TRB_TYPE_NORMAL) | TRB_CTRL_IOC | TRB_CTRL_ISP
                  | (g_kbd_cycle ? TRB_CYCLE : 0);
@@ -486,14 +491,15 @@ static int setup_scratchpad(uint32_t hcsparams2) {
     return 1;
 }
 
-static int find_hid_keyboard(const uint8_t *cfg, uint16_t total_len,
+static int find_hid_boot(const uint8_t *cfg, uint16_t total_len,
                               uint8_t *out_iface, uint8_t *out_ep_addr,
                               uint8_t *out_ep_maxpkt, uint8_t *out_ep_interval,
-                              uint8_t *out_config_value) {
+                              uint8_t *out_config_value, uint8_t *out_protocol) {
     *out_config_value = cfg[5]; /* bConfigurationValue в Configuration Descriptor */
     uint16_t off = 0;
-    int in_hid_boot_kbd = 0;
+    int in_hid_boot = 0;
     uint8_t cur_iface = 0;
+    uint8_t cur_protocol = 0;
 
     while (off + 2 <= total_len) {
         uint8_t len = cfg[off];
@@ -505,8 +511,10 @@ static int find_hid_keyboard(const uint8_t *cfg, uint16_t total_len,
             uint8_t iface_subclass = cfg[off + 6];
             uint8_t iface_protocol = cfg[off + 7];
             cur_iface = cfg[off + 2];
-            in_hid_boot_kbd = (iface_class == 0x03 && iface_subclass == 0x01 && iface_protocol == 0x01);
-        } else if (type == 0x05 && off + 7 <= total_len && in_hid_boot_kbd) { /* Endpoint Descriptor */
+            cur_protocol = iface_protocol;
+            in_hid_boot = (iface_class == 0x03 && iface_subclass == 0x01 && (iface_protocol == 0x01 || iface_protocol == 0x02));
+
+        } else if (type == 0x05 && off + 7 <= total_len && in_hid_boot) { /* Endpoint Descriptor */
             uint8_t ep_addr = cfg[off + 2];
             uint8_t ep_attr = cfg[off + 3];
             if ((ep_addr & 0x80) && (ep_attr & 0x03) == 0x03) { /* Interrupt IN */
@@ -514,6 +522,7 @@ static int find_hid_keyboard(const uint8_t *cfg, uint16_t total_len,
                 *out_ep_addr = ep_addr;
                 *out_ep_maxpkt = cfg[off + 4];
                 *out_ep_interval = cfg[off + 6];
+                *out_protocol = cur_protocol;
                 return 1;
             }
         }
@@ -537,7 +546,7 @@ static uint32_t interval_to_xhci(uint8_t bInterval, int is_lowspeed_or_fullspeed
     return n;
 }
 
-static int setup_keyboard_on_port(uint8_t port_index /* 0-based */) {
+static int setup_hid_on_port(uint8_t port_index /* 0-based */) {
     uint32_t port_base = g_op_base + 0x400 + (uint32_t)port_index * 0x10u;
 
     uint32_t portsc = mmio_read32(port_base);
@@ -610,8 +619,9 @@ static int setup_keyboard_on_port(uint8_t port_index /* 0-based */) {
     if (!control_transfer(0x80, 0x06, (2u << 8) | 0, 0, total_len, g_ctrl_buf, 1)) return 0;
 
     uint8_t iface = 0, ep_addr = 0, ep_maxpkt = 0, ep_interval = 0, config_value = 0;
-    if (!find_hid_keyboard(g_ctrl_buf, total_len, &iface, &ep_addr, &ep_maxpkt, &ep_interval, &config_value)) {
-        return 0; /* нашли устройство, но это не HID boot keyboard */
+    uint8_t protocol = 0;
+    if (!find_hid_boot(g_ctrl_buf, total_len, &iface, &ep_addr, &ep_maxpkt, &ep_interval, &config_value, &protocol)) {
+        return 0; /* устройство не HID boot keyboard/mouse */
     }
 
     if (!control_transfer(0x00, 0x09, config_value, 0, 0, NULL, 0)) return 0; /* SET_CONFIGURATION */
@@ -622,6 +632,8 @@ static int setup_keyboard_on_port(uint8_t port_index /* 0-based */) {
     uint8_t dci = (uint8_t)(ep_num * 2u + 1u); /* IN endpoint */
     g_kbd_ep_dci = dci;
     g_kbd_iface = iface;
+    g_hid_protocol = protocol;
+    g_hid_report_len = protocol == 0x02 ? 4 : 8;
 
     input_ctrl_ctx()[0] = 0;
     input_ctrl_ctx()[1] = (1u << 0) | (1u << dci); /* A0 (slot, для Context Entries) + Adci */
@@ -655,6 +667,9 @@ static int setup_keyboard_on_port(uint8_t port_index /* 0-based */) {
 int xhci_init(void) {
     g_ready = 0;
     g_kbd_present = 0;
+    g_mouse_present = 0;
+    g_hid_protocol = 0;
+    g_hid_report_len = 0;
     g_mmio = 0;
     g_ports = 0;
     g_connected = 0;
@@ -763,7 +778,14 @@ int xhci_init(void) {
     g_ready = 1;
 
     if (first_connected >= 0) {
-        g_kbd_present = setup_keyboard_on_port((uint8_t)first_connected);
+        int hid_ok = setup_hid_on_port((uint8_t)first_connected);
+        if (hid_ok && g_hid_protocol == 0x01) {
+            g_kbd_present = 1;
+            input_set_present(NEXUS_INPUT_SOURCE_USB, NEXUS_INPUT_DEVICE_KEYBOARD, 1);
+        } else if (hid_ok && g_hid_protocol == 0x02) {
+            g_mouse_present = 1;
+            input_set_present(NEXUS_INPUT_SOURCE_USB, NEXUS_INPUT_DEVICE_MOUSE, 1);
+        }
     }
 
     return 1;
@@ -773,9 +795,10 @@ int xhci_is_ready(void) { return g_ready; }
 uint8_t xhci_port_count(void) { return g_ports; }
 uint8_t xhci_connected_ports(void) { return g_connected; }
 int xhci_keyboard_present(void) { return g_kbd_present; }
+int xhci_mouse_present(void) { return g_mouse_present; }
 
 void xhci_poll(void) {
-    if (!g_ready || !g_kbd_present) return;
+    if (!g_ready || (!g_kbd_present && !g_mouse_present)) return;
 
     for (;;) {
         xhci_trb_t *ev = &g_evt_ring[g_evt_deq];
@@ -795,7 +818,12 @@ void xhci_poll(void) {
                 uint64_t trb_addr = ev->parameter;
                 for (int i = 0; i < KBD_RING_TRBS; i++) {
                     if ((uint64_t)(uintptr_t)&g_kbd_ring[i] == trb_addr) {
-                        process_boot_report(g_kbd_reports[i]);
+                        if (g_hid_protocol == 0x01) {
+                            process_boot_report(g_kbd_reports[i]);
+                            input_record_keyboard(NEXUS_INPUT_SOURCE_USB, 0);
+                        } else if (g_hid_protocol == 0x02) {
+                            mouse_process_usb_report(g_kbd_reports[i], g_hid_report_len);
+                        }
                         kbd_ring_push_normal(i);
                         ring_doorbell(g_slot_id, g_kbd_ep_dci);
                         break;

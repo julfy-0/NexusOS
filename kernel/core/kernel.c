@@ -24,15 +24,24 @@
 #include "keyboard.h"
 #include "gui.h"
 #include "usermode.h"
+#include "process.h"
+#include "syscall.h"
 #include "xhci.h"
 #include "gpu.h"
 #include "usb.h"
 #include "mouse.h"
+#include "input.h"
 #include "kernel_events.h"
 #include "event_queue.h"
 #include "scheduler.h"
 #include "target.h"
 #include "nexus_version.h"
+#include "session.h"
+#include "power.h"
+#include "system_info.h"
+#include "app_manager.h"
+#include "package_manager.h"
+#include "network.h"
 
 static volatile uint64_t g_scheduler_service_ticks;
 
@@ -138,6 +147,7 @@ void kmain(nexus_boot_info_t *boot_info) {
 
     console_print("Initializing kernel event queue (IRQ -> deferred events)");
     kernel_events_init();
+    input_init();
     if (event_queue_is_ready()) {
         console_status_ok();
         console_print("  -> capacity: ");
@@ -199,6 +209,10 @@ void kmain(nexus_boot_info_t *boot_info) {
     pci_scan();
     console_status_ok();
 
+    console_print("Initializing network foundation");
+    nexus_network_init();
+    console_status_ok();
+
     console_print("Probing NVMe controller (PCI, namespace 1)");
     if (nvme_init()) {
         console_status_ok();
@@ -219,9 +233,9 @@ void kmain(nexus_boot_info_t *boot_info) {
     console_print("Probing AHCI disk (SATA, port 0, LBA 0)");
     if (ahci_init() && fat32_mount(0)) {
         console_status_ok();
-        vfs_mount("ahci0p0", "/mnt/disk0", "fat32", VFS_MOUNT_RDONLY);
+        vfs_mount("ahci0p0", "/mnt/disk0", "fat32", 0);
         console_set_color(COLOR_CYAN, COLOR_BLACK);
-        console_print("  -> FAT32 mounted at /mnt/disk0, try 'diskls'\n");
+        console_print("  -> FAT32 mounted read-write at /mnt/disk0, try 'diskls' or 'write'\n");
         console_set_color(COLOR_WHITE, COLOR_BLACK);
     } else {
         console_status_warn();
@@ -243,7 +257,12 @@ void kmain(nexus_boot_info_t *boot_info) {
         console_print("\n");
         if (usb_host_type() == USB_HOST_XHCI && xhci_keyboard_present()) {
             console_set_color(COLOR_CYAN, COLOR_BLACK);
-            console_print("  -> USB keyboard ready\n");
+            console_print("  -> USB HID keyboard ready\n");
+            console_set_color(COLOR_WHITE, COLOR_BLACK);
+        }
+        if (usb_host_type() == USB_HOST_XHCI && xhci_mouse_present()) {
+            console_set_color(COLOR_CYAN, COLOR_BLACK);
+            console_print("  -> USB HID mouse ready\n");
             console_set_color(COLOR_WHITE, COLOR_BLACK);
         }
     } else {
@@ -290,8 +309,32 @@ void kmain(nexus_boot_info_t *boot_info) {
      * initialization. The graphical desktop remains available, but is
      * launched explicitly by the "desktop-run" shell command.
      */
+    console_print("Initializing process/address-space foundation");
+    process_init();
+    if (process_is_ready()) {
+        console_status_ok();
+        console_print("  -> max processes: 8 | Process/Ring-3/syscall foundation active\n");
+    } else {
+        console_status_warn();
+    }
+
+    console_print("Initializing Nexus system services");
+    if (nexus_session_init() && nexus_power_init() && nexus_system_info_init() &&
+        nexus_app_manager_init() && nexus_package_manager_init()) {
+        nexus_app_register_builtin("nexus.files", "Files", "builtin:files");
+        nexus_app_register_builtin("nexus.terminal", "Terminal", "builtin:terminal");
+        nexus_app_register_builtin("nexus.settings", "Settings", "builtin:settings");
+        int discovered_system = nexus_package_discover("/system/apps");
+        int discovered_userdata = nexus_package_discover("/userdata/apps");
+        console_status_ok();
+        console_print("  -> discovered applications: ");
+        console_print_dec(discovered_system + discovered_userdata);
+        console_print(" (read-only FAT32 scan)\n");
+    } else console_status_warn();
+
     shell_init();
     usermode_init();
+    syscall_init();
     gui_init(&boot_info->fb);
 
     __asm__ volatile ("sti");

@@ -19,6 +19,7 @@ void scheduler_process(void);
 void scheduler_request_reschedule(void);
 
 uint64_t thread_create(void (*entry)(void *), void *arg);
+uint64_t thread_create_user_process(uint64_t pid);
 void thread_yield(void);
 void thread_sleep_ms(uint64_t milliseconds);
 int thread_wakeup(uint64_t id);

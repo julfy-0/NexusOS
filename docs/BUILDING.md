@@ -27,10 +27,16 @@ sudo apt install qemu-system-x86 ovmf dosfstools mtools
 
 ```bash
 make             # build/BOOTX64.EFI + build/kernel.elf
-make iso         # + iso/EFI/BOOT/BOOTX64.EFI, iso/kernel.elf (структура ESP)
-make run         # + build/fat.img, запуск в QEMU с OVMF
+make iso         # + настоящий загрузочный ISO: build/NexusOS-0.5.11.iso
+make run         # запускает этот ISO в QEMU с OVMF
 make clean       # удалить build/ и iso/
 ```
+
+`make iso` не требует `xorriso`, `mkisofs`, `mtools` или `dosfstools`.
+NexusOS содержит собственный dependency-free генератор `tools/create_iso.py`:
+он создаёт ISO9660 и El Torito EFI boot image с FAT16 ESP, внутри которого
+находятся `\EFI\BOOT\BOOTX64.EFI` и `\kernel.elf`. Это позволяет напрямую
+подключать `build/NexusOS-0.5.11.iso` к VMware как CD/DVD image.
 
 `OVMF_VARS.fd` в корне проекта — рабочая копия NVRAM-переменных
 прошивки; `make run` создаёт её сам при первом запуске, если её нет
@@ -45,11 +51,10 @@ make clean       # удалить build/ и iso/
 
 ## Отладка
 
-- QEMU-окно с UEFI Shell вместо загрузки NexusOS — значит,
-  `BOOTX64.EFI` не нашёлся или не подходит по формату/архитектуре;
-  проверь, что `iso/EFI/BOOT/BOOTX64.EFI` реально существует и что
-  `file build/BOOTX64.EFI` показывает `PE32+ ... (EFI application)
-  x86-64`
+- VMware/QEMU показывает UEFI Shell вместо NexusOS — проверь, что
+  `build/NexusOS-0.5.11.iso` создан и что `file build/BOOTX64.EFI` показывает
+  `PE32+ ... (EFI application) x86-64`. Структурный El Torito/ISO9660 тест
+  выполняется самим `tools/create_iso.py` во время `make iso`.
 - Зависание сразу после "Exiting boot services..." — скорее всего,
   что-то не так в `kernel/arch/x86_64/entry.S` или в `gdt_init()`/`idt_init()`
   до того, как консоль успела что-то напечатать; добавь
@@ -64,3 +69,49 @@ make clean       # удалить build/ и iso/
   для FAT-образа NexusOS подключён как обычный `-drive format=raw`,
   это ДРУГОЙ путь чтения — сам NexusOS его не видит через свой
   AHCI-драйвер, только UEFI видел его на этапе загрузчика)
+
+## Creating release media with `create-img.sh`
+
+`create-img.sh` now creates both release media formats from the same build artifacts:
+
+```bash
+./build.sh
+./create-img.sh
+```
+
+Outputs:
+
+- `NexusOS.img` — GPT disk image with BOOT, SYSTEM and USERDATA partitions.
+- `NexusOS.iso` — bootable ISO9660/El Torito EFI image suitable for VMware.
+
+The paths can be changed independently:
+
+```bash
+./create-img.sh --userdata 1G --out NexusOS.img --iso-out NexusOS.iso
+```
+
+## Creating only the ISO with `create-iso.sh`
+
+If you only need a bootable ISO, without creating the GPT disk image, use the
+standalone ISO creator:
+
+```bash
+./build.sh
+./create-iso.sh
+```
+
+This creates:
+
+```text
+NexusOS.iso
+```
+
+Custom output path:
+
+```bash
+./create-iso.sh --out build/NexusOS-custom.iso
+```
+
+`create-iso.sh` uses the already-built `build/BOOTX64.EFI` and
+`build/kernel.elf`; it does not rebuild the kernel or bootloader and does not
+create `NexusOS.img`.

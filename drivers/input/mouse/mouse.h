@@ -22,5 +22,6 @@ int8_t mouse_get_wheel(void);
 int mouse_has_wheel(void);
 void mouse_clear_moved(void);
 void mouse_clear_wheel(void);
+void mouse_process_usb_report(const uint8_t *report, uint8_t length);
 
 #endif

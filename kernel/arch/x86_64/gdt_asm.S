@@ -29,4 +29,20 @@ gdt_load_tss:
     ltr %di
     ret
 
+/* Build the long-mode privilege transition frame exactly as IRETQ expects.
+ * rdi=entry, rsi=user RSP. SS/RSP/RFLAGS/CS/RIP are popped by iretq. */
+.global arch_enter_user_mode
+.type arch_enter_user_mode,@function
+arch_enter_user_mode:
+    pushq $0x1b
+    pushq %rsi
+    pushfq
+    popq %rax
+    orq $0x200, %rax
+    pushq %rax
+    pushq $0x23
+    pushq %rdi
+    iretq
+.size arch_enter_user_mode, .-arch_enter_user_mode
+
 .section .note.GNU-stack,"",@progbits

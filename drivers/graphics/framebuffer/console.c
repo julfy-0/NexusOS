@@ -26,6 +26,13 @@ static uint32_t g_row = 0;
 static uint32_t g_cols;
 static uint32_t g_rows;
 
+/* Shell stdout capture. Kept in the console layer so existing commands do not
+ * need to be rewritten just to participate in redirection and pipelines. */
+static char *g_capture_buffer;
+static uint32_t g_capture_capacity;
+static uint32_t g_capture_length;
+static int g_capture_active;
+
 /* --- Scrollback (PgUp/PgDn) ---
  *
  * Раньше консоль просто двигала пиксели в framebuffer (см. scroll_if_needed)
@@ -260,7 +267,36 @@ static void scroll_if_needed(void) {
     g_row = g_rows - 1;
 }
 
+void console_capture_begin(char *buffer, uint32_t capacity) {
+    g_capture_buffer = buffer;
+    g_capture_capacity = capacity;
+    g_capture_length = 0;
+    g_capture_active = (buffer != NULL && capacity > 0);
+    if (g_capture_active) g_capture_buffer[0] = '\0';
+}
+
+uint32_t console_capture_end(void) {
+    uint32_t length = g_capture_length;
+    if (g_capture_active && g_capture_capacity > 0) {
+        uint32_t pos = length < g_capture_capacity ? length : g_capture_capacity - 1;
+        g_capture_buffer[pos] = '\0';
+    }
+    g_capture_active = 0;
+    g_capture_buffer = NULL;
+    g_capture_capacity = 0;
+    return length;
+}
+
+int console_capture_active(void) { return g_capture_active; }
+
 void console_putchar(char c) {
+    if (g_capture_active) {
+        if (g_capture_length + 1 < g_capture_capacity) {
+            g_capture_buffer[g_capture_length++] = c;
+            g_capture_buffer[g_capture_length] = '\0';
+        }
+        return;
+    }
     /* Любая новая печать возвращает к живому виду — как в обычном
      * терминале: набрал что-то во время просмотра истории — тебя
      * вернуло вниз, к месту, где реально появляется новый текст. */

@@ -12,6 +12,13 @@ void console_print(const char *s);
 void console_print_hex(uint64_t value);
 void console_print_dec(uint64_t value);
 
+/* Temporary output capture used by the shell I/O layer. While active,
+ * console_putchar()/console_print() append text to the supplied buffer
+ * instead of drawing to the framebuffer. Capture is intentionally bounded. */
+void console_capture_begin(char *buffer, uint32_t capacity);
+uint32_t console_capture_end(void);
+int console_capture_active(void);
+
 /* Строка состояния в духе классического Linux-boot: печатает текущей
  * позицией курсора выровненный к правому краю экрана статус вида
  * "[ OK ]" / "[FAIL]" / "[WARN]" и переводит строку. Использование:

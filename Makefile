@@ -1,4 +1,4 @@
-# NexusOS 0.5.3.4 — Threads & TCB
+# NexusOS 0.5.18 — Enstein
 #
 # This Makefile is the single source of truth for compilation and linking.
 # build.sh is only a progress/UX frontend around the real targets below.
@@ -12,12 +12,14 @@ OBJCOPY ?= objcopy
 
 BUILD  := build
 ISODIR := iso
+NEXUS_VERSION ?= 0.5.18
+ISO_IMAGE := $(BUILD)/NexusOS-$(NEXUS_VERSION).iso
 
 # -----------------------------------------------------------------------------
 # Include paths
 # -----------------------------------------------------------------------------
 
-MODULE_DIRS := $(shell find kernel drivers fs lib gui shell platform -type d 2>/dev/null | sort)
+MODULE_DIRS := $(shell find kernel drivers fs lib gui shell platform system -type d 2>/dev/null | sort)
 INCLUDES := -Iinclude/nexus $(addprefix -I,$(MODULE_DIRS)) -Iassets/fonts
 
 # UEFI bootloader: PE32+ x86-64, Microsoft x64 ABI.
@@ -39,8 +41,8 @@ LDFLAGS_KERNEL := -nostdlib -shared -Bsymbolic -T kernel/arch/x86_64/linker.ld
 # Source/object manifests
 # -----------------------------------------------------------------------------
 
-KERNEL_C_SRCS := $(shell find kernel drivers fs lib gui shell platform -type f -name '*.c' \
-                  ! -path 'kernel/bootmode/*' 2>/dev/null | sort)
+KERNEL_C_SRCS := $(shell find kernel drivers fs lib gui shell platform system -type f -name '*.c' \
+                  ! -path 'kernel/bootmode/*' ! -path 'system/core/init.c' ! -path 'system/core/system.c' 2>/dev/null | sort)
 KERNEL_S_SRCS := $(shell find kernel/arch/x86_64 -type f -name '*.S' 2>/dev/null | sort)
 DRIVER_C_SRCS := $(shell find drivers -type f -name '*.c' 2>/dev/null | sort)
 
@@ -135,16 +137,20 @@ $(ISODIR)/kernel.elf: kernel
 	cp $(BUILD)/kernel.elf $@
 	@test -s $@
 
-# Historical name retained. "make iso" now means the same real EFI staging.
-iso: system
-	@echo "==> EFI staging ready: $(ISODIR)/"
+# Real bootable ISO: ISO9660 + El Torito EFI boot image.
+$(ISO_IMAGE): system tools/create_iso.py
+	python3 tools/create_iso.py --bootloader build/BOOTX64.EFI --kernel build/kernel.elf --out $@
+	@test -s $@
+
+iso: $(ISO_IMAGE)
+	@echo "==> Bootable ISO: $(ISO_IMAGE)"
 
 # -----------------------------------------------------------------------------
 # QEMU compatibility
 # -----------------------------------------------------------------------------
 
 run: iso
-	./run.sh
+	./run.sh --iso $(ISO_IMAGE)
 
 # -----------------------------------------------------------------------------
 # Validation
@@ -152,7 +158,7 @@ run: iso
 
 check:
 	@set -e; \
-	for f in $$(find kernel drivers fs lib gui shell platform -type f -name '*.c' ! -path 'kernel/bootmode/*' | sort); do \
+	for f in $$(find kernel drivers fs lib gui shell platform system -type f -name '*.c' ! -path 'kernel/bootmode/*' ! -path 'system/core/init.c' ! -path 'system/core/system.c' | sort); do \
 		$(CC) $(CFLAGS_KERNEL) -fsyntax-only "$$f"; \
 	done
 	@echo "==> Kernel-side C syntax: OK"

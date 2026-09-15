@@ -1,88 +1,80 @@
-# STATUS.md — current NexusOS state
+# NexusOS 0.5.18 — Enstein
 
-## Version
+## App Manager Foundation
 
-**0.5.3.6 — Enstein**
+NexusOS 0.5.13 retains the App Manager and Application Discovery foundations
+and adds the first writable storage boundary needed for future installation.
 
-The current release baseline is the stable identity-mapped NexusOS kernel.
-The boot and kernel architecture has now been rewritten internally without
-changing the public version number.
+- Built-in applications are registered through a dedicated helper.
+- Applications have stable IDs, names, entry metadata and an explicit source:
+  `builtin`, `system` or `userdata`.
+- The manager tracks `stopped` / `running` state and launch counts.
+- Only one application is considered active at a time.
+- Stopping the active application returns the system to the desktop state.
+- The lifecycle API does not pretend to execute binaries: ELF loading and
+  userspace process execution remain future work.
 
-## Boot & kernel rewrite
+The existing storage mount points `/system/apps` and `/userdata/apps` remain the
+reserved locations for packaged applications. Discovery is still read-only at the
+package-manager level, while the underlying FAT32/VFS backend can now create
+directories and create/overwrite bounded 8.3 files.
 
-- [x] UEFI GOP framebuffer hand-off
-- [x] UEFI boot-volume discovery
-- [x] ELF64 validation and PT_LOAD loading
-- [x] Relocatable ET_DYN kernel image
-- [x] UEFI `R_X86_64_RELATIVE` relocation processing
-- [x] Kernel image allocation below 4 GiB
-- [x] Boot info and final memory map below 4 GiB
-- [x] Runtime kernel physical range passed to PMM
-- [x] Private kernel stack established in `_start`
-- [x] Early boot contract validation
-- [x] GDT / IDT / ISR / PIC / PIT
+## Application Discovery
 
-## Memory
+NexusOS 0.5.13 retains the read-only application discovery path introduced in
+0.5.11. The package manager scans `/system/apps` and
+`/userdata/apps`, parses `manifest.nxm`, and registers valid applications with
+the matching source classification.
 
-- [x] 4 KiB PMM bitmap allocator
-- [x] EFI ConventionalMemory release + reserved-region handling
-- [x] Own 4-level page tables
-- [x] 2 MiB identity mapping for the low 4 GiB
-- [x] 4 KiB VMM mappings
-- [x] Kernel heap with `kmalloc` / `kfree`
-- [x] Page-fault diagnostics
-- [ ] Higher-half kernel
-- [ ] Demand paging / swap / COW
-- [ ] User/kernel address-space isolation
+Discovery itself does not install, extract, or execute applications. ELF loading
+and userspace execution remain separate milestones. The new writable FAT32
+primitive is intentionally lower-level and is not yet exposed as a package
+installer.
 
-## Hardware
+## Networking
 
-- [x] PCI enumeration
-- [x] AHCI / FAT32 read path
-- [x] NVMe read-only driver
-- [x] PS/2 keyboard and mouse
-- [x] USB UHCI/OHCI/EHCI foundations
-- [x] xHCI keyboard path
-- [x] GPU detection / metadata
-- [x] GOP framebuffer console
+The 0.5.9 E1000 networking foundation remains integrated. ARP, IPv4, ICMP, UDP
+and TCP are still future work.
 
-## User-facing system
+## Writable FAT32 Foundation
 
-- [x] Shell and command registry
-- [x] VFS / mount namespace / FAT32 integration
-- [x] GUI desktop, Files, Terminal and Settings
-- [x] Desktop Search / Nexus Menu
-- [x] `neofetch`, `meminfo`, `sysinfo`, `uname`, `version`
-- [x] Timer-driven scheduler foundation
-- [x] Threads, TCBs and x86_64 context switching
-- [x] Scheduler ready/sleep queues and blocking wakeup
-- [x] Synchronization primitives (spinlocks/mutexes)
-- [x] Process-safe event wait/notification layer
-- [ ] User-space processes
-- [ ] Syscall ABI
-- [ ] Unified USB HID input
-- [ ] Networking
+- AHCI supports bounded `WRITE DMA EXT` sector commands.
+- FAT32 can allocate/free clusters and update mirrored FAT copies.
+- FAT32 can create directories and create/overwrite short 8.3 files.
+- The active `/mnt/disk0` mount is read-write.
+- VFS `mkdir`, `touch`, and `write` route to FAT32 when the resolved mount is writable.
+- LFN, journaling, permissions, unlink/rename, transactions and executable loading remain future work.
 
-## Validation
 
-The rewritten tree passes:
+## 0.5.13 — Package Installation Transaction
 
-```text
-make clean
-make -j2
-make iso -j2
-make check
-```
+The Package Manager now provides a conservative transactional installation path. A package directory is validated before mutation, an application directory is staged, the optional single Entry payload is copied with a bounded 64 KiB limit, and `manifest.nxm` is written last as the publication point. Failures roll back the newly created payload and directory when possible.
 
-QEMU runtime validation must be performed on the resulting EFI image in the
-developer's environment; this build environment does not provide QEMU.
 
-## Next roadmap block
+## 0.5.14 — Multi-file package payload
 
-**0.5.3.6 — Process-safe Event Integration** is implemented. Kernel event
-processing now advances per-type sequence counters and wakes blocked kernel
-threads through scheduler wait queues. `kernel_events_wait()` provides a
-race-safe blocking notification boundary without allowing IRQ handlers to
-mutate scheduler lists or switch stacks.
+The Package Manager now accepts an optional `Files` manifest field for up to eight root-level 8.3 payload files. Every payload is preflight-validated before mutation, copied into the staging directory, and removed in reverse order on rollback. `manifest.nxm` remains the final publication point.
 
-Next block: process/address-space foundation.
+
+## 0.5.15 — ELF64 user-space loader foundation
+
+NexusOS can now validate and load small ELF64 x86_64 executables from the
+mounted FAT32 filesystem. `elf-run <path>` creates a process, maps the ELF
+load segments with user permissions, allocates a user stack and enters Ring 3
+through the existing IRETQ transition.
+
+This is intentionally a synchronous execution foundation: the current active
+CR3 is still shared, syscall entry/return is not enabled, and scheduler-owned
+user processes remain future work.
+
+
+## Syscall entry/return
+
+NexusOS 0.5.17 adds the first user-visible syscall entry path through `INT 0x80`. The IDT gate is DPL3, the entry stub saves all general-purpose registers, dispatches NOP/GETPID, returns the result in RAX, and restores the original CPL3 IRETQ frame. `EXIT` remains deferred until scheduler-owned user processes exist; the entry path deliberately refuses to return into an already-terminated process.
+
+
+## Private CR3 / Process Address Spaces
+
+NexusOS 0.5.18 gives each process a private copy of the kernel page-table hierarchy. User mappings are created only in that process CR3, and the scheduler switches CR3 together with the scheduler TCB. User image initialization no longer relies on the active kernel virtual address for the destination; it writes through the process page-table translation into the physical user pages.
+
+The kernel identity map remains available in each address space so existing kernel code and hardware mappings continue to work. The higher-half kernel remains intentionally deferred.

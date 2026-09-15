@@ -53,6 +53,8 @@ int vfs_append(const char *name, const char *content);
  * NULL, если такого файла нет или это директория. Указатель действителен
  * до следующего изменения этого файла. */
 const char *vfs_get_content(const char *name);
+/* Read the current VFS file into a caller-owned bounded buffer. */
+int vfs_read(const char *name, char *buffer, int capacity);
 
 /* Удаляет ПУСТУЮ директорию name из текущей директории (в отличие от
  * vfs_rm, отказывает, если name — файл). 0 = успех, -1 = ошибка. */

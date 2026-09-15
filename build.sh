@@ -8,7 +8,8 @@ set -u -o pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-VERSION="0.5.3.6"
+VERSION="0.5.18"
+ISO_IMAGE="build/NexusOS-${VERSION}.iso"
 BAR_WIDTH=26
 LOG_FILE="build_output.txt"
 NO_CLEAN=0
@@ -113,6 +114,7 @@ BOOT_ARTIFACTS=(
 SYSTEM_ARTIFACTS=(
     "iso/EFI/BOOT/BOOTX64.EFI"
     "iso/kernel.elf"
+    "build/NexusOS-0.5.18.iso"
 )
 
 # OS = unique set of all real build/staging artifacts. No artificial counters.
@@ -228,7 +230,7 @@ fi
 
 # The Makefile target "system" is the existing ISO/EFI staging integration:
 # bootloader + kernel + iso/EFI/BOOT/BOOTX64.EFI + iso/kernel.elf.
-make --no-print-directory -j"$JOBS" system >"$LOG_FILE" 2>&1 &
+make --no-print-directory -j"$JOBS" iso >"$LOG_FILE" 2>&1 &
 MAKE_PID=$!
 
 while kill -0 "$MAKE_PID" 2>/dev/null; do
@@ -256,4 +258,5 @@ printf '  %sJobs:%s       %s\n' "$GRAY" "$RESET" "$JOBS"
 printf '  %sBootloader:%s build/BOOTX64.EFI\n' "$GRAY" "$RESET"
 printf '  %sKernel:%s     build/kernel.elf\n' "$GRAY" "$RESET"
 printf '  %sSystem:%s     iso/\n' "$GRAY" "$RESET"
+printf '  %sISO:%s        %s\n' "$GRAY" "$RESET" "$ISO_IMAGE"
 printf '  %sLog:%s        %s\n' "$GRAY" "$RESET" "$LOG_FILE"

@@ -8,6 +8,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
 DISK_IMG="build/fat.img"
+ISO_IMG=""
 MEM_MB=256
 USE_KVM=1
 REBUILD=0
@@ -28,7 +29,8 @@ NexusOS QEMU launcher
 Usage: ./run.sh [options]
 
 Options:
-  --rebuild       recreate NexusOS.img before booting
+  --rebuild       recreate NexusOS.img before booting (disk-image mode)
+  --iso PATH       boot a bootable NexusOS ISO directly
   --no-kvm        disable KVM acceleration
   --mem MB        guest RAM in MiB (default: $MEM_MB)
   --img PATH      disk image path (default: $DISK_IMG)
@@ -53,6 +55,11 @@ while [[ $# -gt 0 ]]; do
         --img)
             [[ $# -ge 2 ]] || die '--img requires a path'
             DISK_IMG="$2"
+            shift 2
+            ;;
+        --iso)
+            [[ $# -ge 2 ]] || die '--iso requires a path'
+            ISO_IMG="$2"
             shift 2
             ;;
         --window) FULLSCREEN=0; shift ;;
@@ -121,21 +128,25 @@ fi
 # Build / image preparation
 # -----------------------------------------------------------------------------
 
-if [[ "$REBUILD" -eq 1 || ! -f "$DISK_IMG" ]]; then
-    if [[ "$REBUILD" -eq 1 ]]; then
-        info "Rebuilding disk image (--rebuild)"
-    else
-        warn "Disk image not found: $DISK_IMG — creating it now"
-    fi
-    bash create-img.sh --out "$DISK_IMG" \
-        || die "create-img.sh failed"
-fi
-
-[[ -s "$DISK_IMG" ]] || die "Disk image is missing or empty: $DISK_IMG"
 [[ -s build/BOOTX64.EFI ]] || die 'build/BOOTX64.EFI is missing; run ./build.sh'
 [[ -s build/kernel.elf ]] || die 'build/kernel.elf is missing; run ./build.sh'
 
-ok "Disk image: $DISK_IMG"
+if [[ -n "$ISO_IMG" ]]; then
+    [[ -s "$ISO_IMG" ]] || die "ISO image is missing or empty: $ISO_IMG"
+    ok "Bootable ISO: $ISO_IMG"
+else
+    if [[ "$REBUILD" -eq 1 || ! -f "$DISK_IMG" ]]; then
+        if [[ "$REBUILD" -eq 1 ]]; then
+            info "Rebuilding disk image (--rebuild)"
+        else
+            warn "Disk image not found: $DISK_IMG — creating it now"
+        fi
+        bash create-img.sh --out "$DISK_IMG" \
+            || die "create-img.sh failed"
+    fi
+    [[ -s "$DISK_IMG" ]] || die "Disk image is missing or empty: $DISK_IMG"
+    ok "Disk image: $DISK_IMG"
+fi
 ok "OVMF:       $OVMF_CODE"
 
 # --- KVM ---
@@ -208,12 +219,17 @@ fi
 VARS_DRIVE=()
 [[ -n "$OVMF_VARS" && -f "$OVMF_VARS" ]] && VARS_DRIVE=(-drive "if=pflash,format=raw,file=${OVMF_VARS}")
 
-# IMPORTANT: keep the classic QEMU invocation. Only the launcher UI above was
-# redesigned; boot/device behavior is intentionally untouched.
+QEMU_STORAGE=()
+if [[ -n "$ISO_IMG" ]]; then
+    QEMU_STORAGE=(-cdrom "$ISO_IMG")
+else
+    QEMU_STORAGE=(-drive "format=raw,file=${DISK_IMG}")
+fi
+
 exec qemu-system-x86_64 \
     -drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}" \
     "${VARS_DRIVE[@]}" \
-    -drive "format=raw,file=${DISK_IMG}" \
+    "${QEMU_STORAGE[@]}" \
     -m "${MEM_MB}M" \
     -device qemu-xhci,id=xhci \
     -usb \

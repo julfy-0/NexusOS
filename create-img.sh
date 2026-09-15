@@ -8,6 +8,7 @@ RED=$'\033[31m'; GREEN=$'\033[32m'; CYAN=$'\033[36m'; YELLOW=$'\033[33m'; BOLD=$
 if [[ ! -t 1 ]]; then RED=''; GREEN=''; CYAN=''; YELLOW=''; BOLD=''; RESET=''; fi
 
 OUT_IMG="${NEXUS_IMAGE:-NexusOS.img}"
+OUT_ISO="${NEXUS_ISO:-NexusOS.iso}"
 USERDATA_SPEC=""
 
 usage() {
@@ -16,7 +17,8 @@ Usage: $(basename "$0") [options]
 
 Options:
   --userdata SIZE   USERDATA size: 512M, 1G, 2G, 4G, or custom (e.g. 768M)
-  --out PATH        output image (default: $OUT_IMG)
+  --out PATH        output GPT image (default: $OUT_IMG)
+  --iso-out PATH    output bootable ISO (default: $OUT_ISO)
   --help            show this help
 
 Without --userdata, an interactive size menu is shown on a terminal.
@@ -38,6 +40,11 @@ while [[ $# -gt 0 ]]; do
         --out)
             [[ $# -ge 2 ]] || die "--out requires a path"
             OUT_IMG="$2"
+            shift 2
+            ;;
+        --iso-out)
+            [[ $# -ge 2 ]] || die "--iso-out requires a path"
+            OUT_ISO="$2"
             shift 2
             ;;
         --help|-h) usage; exit 0 ;;
@@ -77,6 +84,7 @@ command -v python3 >/dev/null 2>&1 || die 'python3 is required to create the rea
 [[ -f iso/kernel.elf ]] || die 'iso/kernel.elf is missing; run make iso or ./build.sh first'
 
 mkdir -p "$(dirname "$OUT_IMG")"
+mkdir -p "$(dirname "$OUT_ISO")"
 
 info "Creating GPT image: $OUT_IMG"
 info "BOOT=64 MiB | SYSTEM=64 MiB | USERDATA=$USERDATA_SPEC"
@@ -651,3 +659,20 @@ PY
 
 ok "Image verified: $OUT_IMG"
 printf '%s\n' "  BOOT     64 MiB  FAT32  EFI System Partition" "  SYSTEM   64 MiB  FAT32" "  USERDATA $USERDATA_SPEC FAT32" "  Kernel   BOOT/kernel.elf (existing UEFI bootloader compatibility)" "  System   SYSTEM/KERNEL/KERNEL.ELF (real kernel mirror)"
+
+
+# Also produce the standalone bootable ISO from the same build artifacts.
+# This is intentionally done after the GPT image is verified so `create-img.sh`
+# becomes a one-command release media creator for both VMware and disk-image use.
+command -v python3 >/dev/null 2>&1 || die 'python3 is required to create the bootable ISO'
+[[ -f tools/create_iso.py ]] || die 'tools/create_iso.py is missing'
+
+info "Creating bootable ISO: $OUT_ISO"
+python3 tools/create_iso.py \
+    --bootloader build/BOOTX64.EFI \
+    --kernel build/kernel.elf \
+    --out "$OUT_ISO"
+
+[[ -s "$OUT_ISO" ]] || die "bootable ISO was not created: $OUT_ISO"
+ok "ISO verified: $OUT_ISO"
+printf '%s\n' "  EFI      EFI/BOOT/BOOTX64.EFI" "  Kernel   kernel.elf" "  Format   ISO9660 + El Torito EFI"

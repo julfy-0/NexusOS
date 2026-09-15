@@ -7,6 +7,7 @@
 #include "vfs.h"
 #include "mount.h"
 #include "command_registry.h"
+#include "parser.h"
 
 extern int strcmp(const char *a, const char *b);
 
@@ -118,43 +119,113 @@ void shell_history_next(void) {
     }
 }
 
-static int shell_space(char c) {
-    return c == ' ' || c == '\t';
+#define SHELL_IO_BUF_SIZE 2048
+
+/* Build the legacy command argument string from parsed argv plus the shell's
+ * current stdin payload. Existing commands keep their current API while the
+ * shell gains a small, bounded I/O transport. */
+static void build_args(shell_parsed_command_t *c, const char *input,
+                       char *args, int capacity) {
+    int pos = 0;
+    args[0] = '\0';
+    for (int i = 1; i < c->argc; ++i) {
+        int j = 0;
+        if (pos && pos < capacity - 1) args[pos++] = ' ';
+        while (c->argv[i][j] && pos < capacity - 1) args[pos++] = c->argv[i][j++];
+    }
+    if (input && input[0]) {
+        if (pos && pos < capacity - 1) args[pos++] = ' ';
+        int j = 0;
+        while (input[j] && pos < capacity - 1) args[pos++] = input[j++];
+    }
+    args[pos] = '\0';
 }
 
-static char *split_args(char *cmd) {
-    while (shell_space(*cmd)) {
-        cmd++;
+static int execute_one(shell_parsed_command_t *c, const char *stdin_text,
+                       char *stdout_text, int capture) {
+    static char args[SHELL_IO_BUF_SIZE];
+    static char redirected_input[SHELL_IO_BUF_SIZE];
+    const char *input = stdin_text;
+
+    if (c->argc == 0) return 0;
+
+    if (c->redirect_in) {
+        if (vfs_read(c->redirect_in, redirected_input, SHELL_IO_BUF_SIZE) < 0) {
+            console_print("shell: input file not found: ");
+            console_print(c->redirect_in);
+            console_print("\n");
+            return 0;
+        }
+        input = redirected_input;
     }
 
-    char *args = cmd;
-    while (*args != '\0' && !shell_space(*args)) {
-        args++;
-    }
+    build_args(c, input, args, SHELL_IO_BUF_SIZE);
+    if (capture) console_capture_begin(stdout_text, SHELL_IO_BUF_SIZE);
 
-    if (*args != '\0') {
-        *args = '\0';
-        args++;
-        while (shell_space(*args)) {
-            args++;
+    int ok = shell_command_execute(c->argv[0], args);
+    if (capture) console_capture_end();
+
+    if (!ok) {
+        if (!capture) {
+            console_print("command not found: "); console_print(c->argv[0]);
+            console_print("\nType 'help' for available commands.\n");
+        }
+        return 0;
+    }
+    return 1;
+}
+
+static int execute_pipeline(shell_parsed_command_t *commands, int first, int last) {
+    static char pipe_a[SHELL_IO_BUF_SIZE];
+    static char pipe_b[SHELL_IO_BUF_SIZE];
+    const char *input = 0;
+    char *out = pipe_a;
+    int ok = 1;
+
+    for (int i = first; i <= last; ++i) {
+        int need_capture = (i < last) || commands[i].redirect_out;
+        out[0] = '\0';
+        ok = execute_one(&commands[i], input, out, need_capture);
+        if (!ok) return 0;
+
+        if (commands[i].redirect_out) {
+            int rc = commands[i].append
+                ? vfs_append(commands[i].redirect_out, out)
+                : vfs_write(commands[i].redirect_out, out);
+            if (rc != 0) {
+                console_print("shell: cannot redirect output to ");
+                console_print(commands[i].redirect_out);
+                console_print("\n");
+                return 0;
+            }
+        }
+
+        if (i < last) {
+            input = out;
+            out = (out == pipe_a) ? pipe_b : pipe_a;
         }
     }
-    return args;
+    return ok;
 }
 
 static void execute(char *cmd) {
-    if (cmd[0] == '\0') {
-        return;
-    }
+    shell_parsed_command_t commands[SHELL_MAX_COMMANDS];
+    int count = shell_parse_line(cmd, commands, SHELL_MAX_COMMANDS);
+    if (count < 0) { console_print("shell: syntax error\n"); return; }
 
-    char *args = split_args(cmd);
-    if (shell_command_execute(cmd, args)) {
-        return;
-    }
+    int last_status = 1;
+    int i = 0;
+    while (i < count) {
+        if (i > 0 && commands[i - 1].next == SHELL_OP_AND && !last_status) {
+            i++;
+            continue;
+        }
 
-    console_print("command not found: ");
-    console_print(cmd);
-    console_print("\nType 'help' for available commands.\n");
+        int end = i;
+        while (end < count - 1 && commands[end].next == SHELL_OP_PIPE) end++;
+        last_status = execute_pipeline(commands, i, end);
+        i = end + 1;
+    }
 }
 
 void shell_init(void) {

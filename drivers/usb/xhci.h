@@ -7,8 +7,8 @@
  *
  * xhci_init() поднимает контроллер полностью: DCBAA, command ring,
  * event ring, сброс и адресация первого подключённого устройства,
- * получение дескрипторов, поиск HID boot keyboard interface и запуск
- * interrupt IN трансфера для неё. Прерывание от самого контроллера
+ * получение дескрипторов, поиск HID HID boot keyboard/mouse interface и запуск
+ * interrupt IN трансфера для найденного устройства. Прерывание от самого контроллера
  * (MSI/legacy IRQ) не используется — вместо этого event ring
  * опрашивается на каждый таймерный event в kernel_events_process(), а не
  * внутри IRQ-контекста. Этого более чем достаточно для клавиатуры (100 Hz
@@ -21,6 +21,7 @@ uint8_t xhci_connected_ports(void);
 
 /* 1 если во время init нашлась и настроилась HID boot keyboard. */
 int xhci_keyboard_present(void);
+int xhci_mouse_present(void);
 
 /* Вызывается из kernel event loop. Проверяет event ring и, если там
  * появился завершённый interrupt transfer клавиатуры, разбирает HID boot

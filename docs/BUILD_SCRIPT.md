@@ -1,6 +1,6 @@
 # NexusOS build.sh
 
-`build.sh` is the pretty command-line build frontend for NexusOS 0.5.3.4
+`build.sh` is the pretty command-line build frontend for NexusOS 0.5.11
 
 Run from the project root:
 
@@ -23,7 +23,7 @@ Bootloader   [########################] 100%
 OS           [########################] 100%
 ```
 
-The bars are derived from real object/final-output files under `build/` and `iso/`. `OS` is the overall completion ratio across the complete build artifact set. The script is a frontend over the existing Makefile, not a separate build system.
+The bars are derived from real object/final-output files under `build/` and `iso/`. `OS` is the overall completion ratio across the complete build artifact set, including the final bootable ISO. The script is a frontend over the existing Makefile, not a separate build system.
 
 
 ### Parallel build

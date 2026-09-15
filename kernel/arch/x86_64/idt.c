@@ -33,6 +33,7 @@ static idt_entry_t idt[256];
 static idt_ptr_t idtp;
 
 #define IDT_TYPE_INTERRUPT_GATE 0x8E /* present, DPL0, 64-bit interrupt gate */
+#define IDT_TYPE_USER_INTERRUPT_GATE 0xEE /* present, DPL3, 64-bit interrupt gate */
 
 /* Заглушки из isr.S */
 extern void isr0(void);  extern void isr1(void);  extern void isr2(void);  extern void isr3(void);
@@ -47,6 +48,7 @@ extern void isr32(void); extern void isr33(void); extern void isr34(void); exter
 extern void isr36(void); extern void isr37(void); extern void isr38(void); extern void isr39(void);
 extern void isr40(void); extern void isr41(void); extern void isr42(void); extern void isr43(void);
 extern void isr44(void); extern void isr45(void); extern void isr46(void); extern void isr47(void);
+extern void syscall_entry(void);
 
 static void *isr_table[48] = {
     isr0,  isr1,  isr2,  isr3,  isr4,  isr5,  isr6,  isr7,
@@ -83,6 +85,11 @@ void idt_init(void) {
     for (int i = 0; i < 48; i++) {
         idt_set_gate(i, isr_table[i], GDT_KERNEL_CODE, IDT_TYPE_INTERRUPT_GATE);
     }
+
+    /* INT 0x80 is the first user-visible syscall ABI. It is deliberately
+     * separate from the IRQ/exception dispatcher so user syscalls never enter
+     * capture-only hardware IRQ code. */
+    idt_set_gate(0x80, syscall_entry, GDT_KERNEL_CODE, IDT_TYPE_USER_INTERRUPT_GATE);
 
     idtp.limit = sizeof(idt) - 1;
     idtp.base = (uint64_t)(uintptr_t)idt;

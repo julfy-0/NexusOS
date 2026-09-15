@@ -32,6 +32,17 @@ void paging_init(nexus_boot_info_t *bi);
  * (шелл-команда meminfo и т.п.). */
 uint64_t paging_get_cr3(void);
 
+/* Address-space primitives. Each process receives a private copy of the
+ * current kernel page-table hierarchy; user mappings are then added only to
+ * that hierarchy. */
+uint64_t paging_kernel_cr3(void);
+uint64_t paging_create_address_space(void);
+void paging_destroy_address_space(uint64_t cr3);
+int paging_switch_cr3(uint64_t cr3);
+int paging_map_page_in_cr3(uint64_t cr3, uint64_t virtual_address, uint64_t physical_address, uint64_t flags);
+int paging_unmap_page_in_cr3(uint64_t cr3, uint64_t virtual_address);
+uint64_t paging_virt_to_phys_in_cr3(uint64_t cr3, uint64_t virtual_address);
+
 /* Сколько GiB покрыто "базовой" (всегда присутствующей) identity-map
  * низкой памяти, не считая точечных доп. регионов (framebuffer и то,
  * что реально было в EFI memory map выше этого порога). Для диагностики. */

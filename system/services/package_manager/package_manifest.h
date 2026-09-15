@@ -9,6 +9,7 @@ typedef struct {
     char type[32];
     char entry[96];
     char icon[96];
+    char files[192];
 } nexus_package_manifest_t;
 
 int nexus_package_manifest_parse(const char *text, nexus_package_manifest_t *out);

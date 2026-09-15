@@ -6,6 +6,7 @@
 #include "pit.h"
 #include "nexus_version.h"
 #include "vfs.h"
+#include "window.h"
 
 extern const uint8_t _binary_assets_wallpapers_nexus_default_rgb565_start[];
 extern const uint8_t _binary_assets_wallpapers_nexus_default_rgb565_end[];
@@ -212,16 +213,26 @@ static int search_result_at(int selected) {
     return -1;
 }
 
+static gui_window_t *window_for(int id, const char *title, int w, int h) {
+    return gui_window_open((gui_window_id_t)id, title, w, h);
+}
+
+static void draw_window_frame(gui_window_t *win) {
+    rect_alpha(win->x + 2, win->y + 3, win->width, win->height, 0x000000, 70);
+    rect_alpha(win->x, win->y, win->width, win->height, 0x17141F, 238);
+    rect_alpha(win->x, win->y, win->width, 32, 0x302A3B, 248);
+    rect_alpha(win->x + win->width - 30, win->y + 8, 16, 16, 0x7A4055, 220);
+    text_at("X", win->x + win->width - 27, win->y + 8, 1, 0xFFFFFF);
+    if (win->title) text_at(win->title, win->x + 14, win->y + 8, 1, 0xF4F1F8);
+}
+
 static void draw_search(void) {
     draw_wallpaper();
     int w=(int)fb->width*2/3, h=(int)fb->height*2/3;
     if(w<500) w=(int)fb->width-24;
     if(h<280) h=(int)fb->height-24;
-    int x=((int)fb->width-w)/2, y=((int)fb->height-h)/2;
-    rect_alpha(x,y,w,h,0x17141F,242);
-    rect_alpha(x,y,w,42,0x302A3B,250);
-    text_at("NexusOS Search",x+16,y+13,1,0xF4F1F8);
-    text_at("ESC",x+w-40,y+13,1,0xD7D1E1);
+    gui_window_t *win=window_for(GUI_WINDOW_SEARCH,"NexusOS Search",w,h); if(!win)return; int x=win->x,y=win->y; w=win->width; h=win->height;
+    draw_window_frame(win);
     rect_alpha(x+18,y+58,w-36,34,0x383240,235);
     draw_search_icon(x+36,y+75);
     text_at("> ",x+54,y+68,1,0xFFFFFF);
@@ -253,11 +264,8 @@ static void draw_terminal(void) {
     int w=(int)fb->width*3/4, h=(int)fb->height*3/4;
     if (w < 500) w = (int)fb->width - 24;
     if (h < 300) h = (int)fb->height - 24;
-    int x=((int)fb->width-w)/2, y=((int)fb->height-h)/2;
-    rect_alpha(x,y,w,h,0x17141F,235);
-    rect_alpha(x,y,w,32,0x302A3B,245);
-    text_at("NexusOS Terminal",x+14,y+8,1,0xF4F1F8);
-    text_at("ESC",x+w-38,y+8,1,0xD7D1E1);
+    gui_window_t *win=window_for(GUI_WINDOW_TERMINAL,"NexusOS Terminal",w,h); if(!win)return; int x=win->x,y=win->y; w=win->width; h=win->height;
+    draw_window_frame(win);
     text_at("NexusOS " NEXUS_VERSION_STRING " Terminal",x+16,y+52,1,0xCFC8DC);
     text_at(g_term_output,x+16,y+78,1,0xEEEAF4);
     text_at("Commands: help  clear  version  uptime  desktop",x+16,y+h-64,1,0xAFA8BC);
@@ -272,11 +280,8 @@ static void draw_settings(void) {
     int w=(int)fb->width*2/3, h=(int)fb->height*2/3;
     if (w < 520) w=(int)fb->width-24;
     if (h < 330) h=(int)fb->height-24;
-    int x=((int)fb->width-w)/2, y=((int)fb->height-h)/2;
-    rect_alpha(x,y,w,h,0x17141F,238);
-    rect_alpha(x,y,w,36,0x302A3B,248);
-    text_at("NexusOS Settings",x+16,y+10,1,0xF4F1F8);
-    text_at("ESC",x+w-40,y+10,1,0xD7D1E1);
+    gui_window_t *win=window_for(GUI_WINDOW_SETTINGS,"NexusOS Settings",w,h); if(!win)return; int x=win->x,y=win->y; w=win->width; h=win->height;
+    draw_window_frame(win);
     text_at("SYSTEM",x+20,y+58,1,0xBFAEFF);
     const char *items[5] = {"Version   NexusOS " NEXUS_VERSION_DISPLAY "","Display   Automatic framebuffer resolution","Input     PS/2 Keyboard and Mouse","Uptime    System runtime","About     NexusOS x86_64 / UEFI"};
     for(int i=0;i<5;i++) {
@@ -295,9 +300,8 @@ static void draw_files(void) {
     int w=(int)fb->width*3/4, h=(int)fb->height*3/4;
     if(w<520) w=(int)fb->width-24;
     if(h<340) h=(int)fb->height-24;
-    int x=((int)fb->width-w)/2, y=((int)fb->height-h)/2;
-    rect_alpha(x,y,w,h,0x17141F,238); rect_alpha(x,y,w,36,0x302A3B,248);
-    text_at("NexusOS Files",x+16,y+10,1,0xF4F1F8); text_at("ESC",x+w-40,y+10,1,0xD7D1E1);
+    gui_window_t *win=window_for(GUI_WINDOW_FILES,"NexusOS Files",w,h); if(!win)return; int x=win->x,y=win->y; w=win->width; h=win->height;
+    draw_window_frame(win);
     text_at(cwd,x+18,y+52,1,0xBFAEFF);
     text_at("..",x+28,y+82,1,0xD8D3E0);
     if(g_files_item==0) rect_alpha(x+14,y+76,w-28,24,0x5A506B,170);
@@ -337,7 +341,7 @@ static void terminal_execute(void) {
 
 void gui_init(nexus_framebuffer_t *f) {
     fb = f;
-    if (f) mouse_set_screen_size(f->width, f->height);
+    if (f) { mouse_set_screen_size(f->width, f->height); gui_window_manager_init((int)f->width, (int)f->height); }
     g_gui_active = 0;
     g_selected_app = 0;
 }
@@ -465,6 +469,9 @@ void gui_update(void) {
     uint8_t buttons = mouse_get_buttons();
     uint8_t pressed = buttons & (uint8_t)~g_prev_buttons;
     g_prev_buttons = buttons;
+    int window_event = gui_window_pointer(mx, my, buttons, pressed);
+    if (window_event < 0) { gui_window_close((gui_window_id_t)(-window_event)); g_view = 0; redraw = 1; }
+    else if (window_event > 0) redraw = 1;
 
     /* Mouse polish for Search: hover selects rows, click executes. */
     if (g_view == 4) {
