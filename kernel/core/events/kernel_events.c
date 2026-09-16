@@ -5,6 +5,7 @@
 #include "mouse.h"
 #include "xhci.h"
 #include "scheduler.h"
+#include "watchdog.h"
 
 #define KERNEL_EVENT_TYPE_COUNT 4u
 
@@ -51,7 +52,10 @@ void kernel_events_init(void) {
 
 void kernel_events_process(void) {
     nexus_event_t event;
-    while (event_queue_pop(&event)) {
+    /* Bound normal-context event draining so a sustained input storm cannot
+     * monopolize the kernel forever. Remaining events are consumed on the
+     * next pass through the main loop. */
+    for (uint32_t budget = 0; budget < 128u && event_queue_pop(&event); ++budget) {
         switch ((nexus_event_type_t)event.type) {
             case NEXUS_EVENT_TIMER_TICK:
                 /* PIT and scheduler accounting happened in IRQ context; the
@@ -78,6 +82,7 @@ void kernel_events_process(void) {
         }
         g_processed++;
     }
+    nexus_watchdog_heartbeat();
 }
 
 int kernel_events_wait(nexus_event_type_t type) {

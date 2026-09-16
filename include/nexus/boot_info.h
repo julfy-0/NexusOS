@@ -16,6 +16,8 @@ typedef struct {
     uint32_t height;
     uint32_t pixels_per_scanline;
     uint32_t pixel_format;      /* NEXUS_PIXFMT_* */
+    uint32_t mode_index;        /* UEFI GOP mode index */
+    uint32_t mode_count;        /* available GOP mode count */
 } nexus_framebuffer_t;
 
 typedef struct {

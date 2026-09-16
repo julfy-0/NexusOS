@@ -5,6 +5,7 @@
 #include "process.h"
 #include "usermode.h"
 #include "paging.h"
+#include "watchdog.h"
 
 #define SCHED_MAX_THREADS NEXUS_SCHEDULER_MAX_THREADS
 #define SCHED_STACK_SIZE 16384u
@@ -342,6 +343,7 @@ void scheduler_tick_irq(void) {
         g_current->runtime_ticks++;
         if (g_current->process_pid) process_account_cpu_tick(g_current->process_pid);
     }
+    nexus_watchdog_timer_tick();
     if (g_quantum_remaining > 0) g_quantum_remaining--;
     if (g_quantum_remaining == 0) {
         g_quantum_expirations++;

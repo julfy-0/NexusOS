@@ -1,6 +1,6 @@
-# NexusOS 0.6.0 — Enstein
+# NexusOS 0.6.5 — Enstein
 
-NexusOS 0.6.0 is the start of the large integration milestone. The source currently includes the 0.5.x userspace/process/storage foundations plus a new font service, compact colored startup logging, and hardware/process/module inspection commands.
+NexusOS 0.6.5 is the start of the large integration milestone. The source currently includes the 0.5.x userspace/process/storage foundations plus a new font service, compact colored startup logging, and hardware/process/module inspection commands.
 
 The full 0.6.0 target is tracked in `docs/0.6.0_PLAN.md`: 128+ feature targets and 200 hardening/fix targets. Those targets remain open until each item is implemented and validated.
 

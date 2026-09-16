@@ -8,7 +8,7 @@ set -u -o pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-VERSION="0.6.5"
+VERSION="0.6.0"
 ISO_IMAGE="build/NexusOS-${VERSION}.iso"
 BAR_WIDTH=26
 LOG_FILE="build_output.txt"
@@ -162,7 +162,7 @@ BOOT_ARTIFACTS=(
 SYSTEM_ARTIFACTS=(
     "iso/EFI/BOOT/BOOTX64.EFI"
     "iso/kernel.elf"
-    "build/NexusOS-0.6.5.iso"
+    "build/NexusOS-0.6.0.iso"
 )
 
 # OS = unique set of all real build/staging artifacts. No artificial counters.
@@ -347,7 +347,7 @@ create_image_and_iso() {
 }
 
 launch_nexus() {
-    local display_backend="${NEXUS_QEMU_DISPLAY:-gtk,gl=off}"
+    local display_backend="${NEXUS_QEMU_DISPLAY:-sdl,gl=off}"
     command -v qemu-system-x86_64 >/dev/null 2>&1 || { printf '%s%sERROR:%s qemu-system-x86_64 not found\n' "$BOLD" "$RED" "$RESET" >&2; return 1; }
     local ovmf_code ovmf_vars vars_template
     find_first_file() {

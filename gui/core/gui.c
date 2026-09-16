@@ -8,6 +8,8 @@
 #include "nexus_version.h"
 #include "vfs.h"
 #include "window.h"
+#include "heap.h"
+#include <string.h>
 
 extern const uint8_t _binary_assets_wallpapers_nexus_default_rgb565_start[];
 extern const uint8_t _binary_assets_wallpapers_nexus_default_rgb565_end[];
@@ -38,6 +40,9 @@ static int g_cursor_visible;
 static int g_cursor_x;
 static int g_cursor_y;
 static uint32_t g_cursor_saved[16 * 16];
+static uint32_t *g_backbuffer;
+static uint64_t g_backbuffer_bytes;
+static uint32_t g_render_stride;
 
 static inline uint32_t pack(uint32_t rgb) {
     uint8_t r = (uint8_t)(rgb >> 16), g = (uint8_t)(rgb >> 8), b = (uint8_t)rgb;
@@ -53,7 +58,20 @@ static inline uint32_t blend_word(uint32_t old, uint32_t src, uint8_t alpha) {
 }
 
 static inline uint32_t *fb_row(uint32_t y) {
-    return (uint32_t *)(uintptr_t)(g_fb_base + (uint64_t)y * g_fb_stride);
+    uint64_t base = g_backbuffer ? (uint64_t)(uintptr_t)g_backbuffer : g_fb_base;
+    uint32_t stride = g_backbuffer ? g_render_stride : g_fb_stride;
+    return (uint32_t *)(uintptr_t)(base + (uint64_t)y * stride);
+}
+
+static void gui_present(void) {
+    if (!fb || !g_backbuffer) return;
+    uint8_t *dst = (uint8_t *)(uintptr_t)g_fb_base;
+    const uint8_t *src = (const uint8_t *)(uintptr_t)g_backbuffer;
+    uint32_t rows = fb->height;
+    uint32_t bytes = fb->width * 4u;
+    for (uint32_t y = 0; y < rows; ++y) {
+        memcpy(dst + (uint64_t)y * g_fb_stride, src + (uint64_t)y * g_render_stride, bytes);
+    }
 }
 
 static inline void px(int x, int y, uint32_t c) {
@@ -398,7 +416,21 @@ static void terminal_execute(void) {
 void gui_init(nexus_framebuffer_t *f) {
     fb = f;
     g_cursor_visible = 0;
-    if (f) { g_fb_base=(uint64_t)f->base; g_fb_stride=f->pixels_per_scanline*4u; g_fb_bgr=(f->pixel_format==NEXUS_PIXFMT_BGR); mouse_set_screen_size(f->width, f->height); gui_window_manager_init((int)f->width, (int)f->height); }
+    g_backbuffer = NULL;
+    g_backbuffer_bytes = 0;
+    g_render_stride = 0;
+    if (f) {
+        g_fb_base=(uint64_t)f->base;
+        g_fb_stride=f->pixels_per_scanline*4u;
+        g_fb_bgr=(f->pixel_format==NEXUS_PIXFMT_BGR);
+        g_render_stride=f->width*4u;
+        g_backbuffer_bytes=(uint64_t)f->width*(uint64_t)f->height*4u;
+        if (g_backbuffer_bytes <= (256ULL<<20))
+            g_backbuffer=(uint32_t *)kmalloc((size_t)g_backbuffer_bytes);
+        if (g_backbuffer) memset(g_backbuffer, 0, (size_t)g_backbuffer_bytes);
+        mouse_set_screen_size(f->width, f->height);
+        gui_window_manager_init((int)f->width, (int)f->height);
+    }
     g_gui_active = 0;
     g_selected_app = 0;
 }
@@ -513,6 +545,7 @@ void gui_draw_desktop(void) {
     if (g_gui_message && g_gui_message[0])
         text_center(g_gui_message, panel_y - 18, 1, 0xD7D1E1);
     draw_cursor();
+    gui_present();
 }
 
 void gui_update(void) {
@@ -620,6 +653,6 @@ void gui_update(void) {
 
     if(now!=g_last_clock_second){g_last_clock_second=now;redraw=1;}
     if(redraw) gui_draw_desktop();
-    else if(moved && g_view==0) draw_cursor();
+    else if(moved && g_view==0) { draw_cursor(); gui_present(); }
 }
 

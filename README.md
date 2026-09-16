@@ -4,9 +4,9 @@ NexusOS is a freestanding x86_64 operating-system project built around a UEFI bo
 
 ## Current release
 
-**NexusOS 0.6.0 — Enstein**
+**NexusOS 0.6.5 — Enstein**
 
-The current milestone is the **NexusOS 0.6.0 Platform Integration**. This release expands the userspace ABI, process metadata, VFS-backed descriptors, memory mapping foundation, scheduler accounting and the embedded Roboto font system.
+The current milestone is the **NexusOS 0.6.5 Scheduler Introspection**. This release expands the userspace ABI with process, environment, timing, descriptor and memory-information system calls while preserving the 0.6.x stability work.
 
 ## Build
 
@@ -18,7 +18,7 @@ make -j2 iso
 make check
 ```
 
-The bootable ISO is produced at `build/NexusOS-0.6.0.iso`.
+The bootable ISO is produced at `build/NexusOS-0.6.5.iso`.
 
 For a standalone ISO from an already-built tree:
 
@@ -31,7 +31,7 @@ For a standalone ISO from an already-built tree:
 See `docs/` for architecture, building, networking, shell I/O, filesystem, release, roadmap and the current 0.6.0 implementation set.
 
 
-### NexusOS 0.6.0
+### NexusOS 0.6.5
 
 The 0.6.0 integration milestone is tracked in `docs/0.6.0_PLAN.md` with a 128+ feature target and 200 hardening/fix target.
 
@@ -60,3 +60,7 @@ To rebuild only the image/media from existing build artifacts:
 ```
 
 `NexusOS.img` and `NexusOS.iso` are created in the project root by default.
+
+
+### 0.6.0 Display modes and framebuffer
+NexusOS enumerates UEFI GOP modes and prefers the largest available pixel-area mode. The GUI can render into a kernel backbuffer and present it to the firmware framebuffer. UEFI GOP basic mode information does not expose refresh rate; exact arbitrary-Hz switching remains GPU-driver work.

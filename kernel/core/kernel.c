@@ -43,6 +43,8 @@
 #include "package_manager.h"
 #include "network.h"
 #include "module.h"
+#include "watchdog.h"
+#include "panic.h"
 
 static volatile uint64_t g_scheduler_service_ticks;
 
@@ -109,7 +111,9 @@ void kmain(nexus_boot_info_t *boot_info) {
     console_component_status("event queue", "service", "1.0", event_queue_is_ready());
 
     scheduler_init(pit_get_frequency_hz());
+    nexus_watchdog_init(pit_get_frequency_hz());
     console_component_status("scheduler", "service", "1.0", scheduler_is_ready());
+    console_component_status("watchdog", "service", "1.0", 1);
     if (scheduler_is_ready()) {
         uint64_t service_tid = thread_create(scheduler_service_thread, NULL);
         console_component_status("scheduler service thread", "service", "1.0", service_tid != 0);
@@ -150,18 +154,28 @@ void kmain(nexus_boot_info_t *boot_info) {
     }
     console_component_status("system services", "service", "1.0", services_ok);
 
-    shell_init();
-    console_component_status("shell", "service", "1.0", 1);
+    /* Finish all startup/service initialization before handing the console
+     * to the interactive shell. shell_init() intentionally clears the visible
+     * boot log so startup status lines can never land inside the input prompt. */
     usermode_init();
     console_component_status("usermode", "service", "1.0", 1);
     syscall_init();
     console_component_status("syscall", "service", "1.0", 1);
     gui_init(&boot_info->fb);
     console_component_status("gui", "service", "1.0", 1);
+    console_component_status("shell", "service", "1.0", 1);
+
+    shell_init();
 
     __asm__ volatile ("sti");
 
     for (;;) {
+        nexus_watchdog_heartbeat();
+        if (nexus_watchdog_trip_pending()) {
+            nexus_watchdog_clear_trip();
+            critical_os_stop("normal kernel execution stalled for more than 3 seconds");
+        }
+
         /* All keyboard/mouse/timer work captured by IRQ handlers is drained
          * here in normal kernel context, with interrupts enabled. This is the
          * event-queue boundary: shell commands are no longer

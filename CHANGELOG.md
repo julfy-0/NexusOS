@@ -1,3 +1,176 @@
+## NexusOS 0.6.5 — QEMU Window Compatibility
+
+### Changed
+- Restored the QEMU GTK window backend as the default display backend.
+- Disabled host-side OpenGL in the default GTK backend to avoid Mesa/Zink/Wayland initialization failures under WSL.
+- `NEXUS_QEMU_DISPLAY` remains available for custom QEMU display backends.
+
+### Notes
+- NexusOS version remains 0.6.5 - Enstein.
+- This change affects the host-side QEMU window only; it does not change the NexusOS framebuffer architecture.
+
+## NexusOS 0.6.5 — Version Consistency and Build Stability
+
+### Added
+- Unified 0.6.5 version metadata across kernel, build system and documentation.
+- Build/version consistency checks for release artifacts.
+- QEMU display backend override remains configurable through `NEXUS_QEMU_DISPLAY`.
+
+### Build System
+- Release ISO and image names now follow the single NexusOS version source.
+- Build output uses the current NexusOS version consistently.
+- Version drift between kernel headers, Makefile, README and status documentation is corrected.
+
+### Stability
+- Preserved the 0.6.x watchdog and bounded event-processing changes.
+- Preserved Critical OS Stop handling for unrecoverable kernel-level failures.
+- Preserved the safer QEMU `sdl,gl=off` default for host environments with broken EGL/Zink paths.
+
+### Notes
+- NexusOS version is now **0.6.5 - Enstein**.
+- The 0.6.x line remains focused on stability, diagnostics and platform hardening before the 0.7.x feature program.
+
+## NexusOS 0.6.4 — Scheduler Introspection Syscalls
+
+### Added
+- Additional Ring-3 system calls for scheduler and thread-state inspection.
+
+### Syscall
+- `GETQUANTUM_EXPIRATIONS`
+- `GETCONTEXT_SWITCHES`
+- `GETTIMER_HZ`
+- `GETQUANTUM_TICKS`
+- `GETTHREAD_COUNT`
+- `GETMAX_THREADS`
+- `GETREADY_COUNT`
+- `GETSLEEPING_COUNT`
+- `GETTHREAD_SWITCHES`
+- `GETTHREAD_RUNTIME`
+
+### Scheduler
+- Userspace can inspect global scheduler activity without accessing kernel pointers.
+- Thread switch and runtime counters are exposed through validated scalar syscalls.
+- Timer and quantum configuration can be queried by userspace.
+
+### Notes
+- Stability and freeze diagnostics from NexusOS 0.6.1 are preserved.
+- Expanded syscall ABI from NexusOS 0.6.2 and 0.6.3 is preserved.
+- The 0.6.x line remains focused on stability, observability and hardware compatibility before the 0.7.x feature program.
+
+## NexusOS 0.6.3 — Expanded System Introspection Syscalls
+
+### Added
+- Additional Ring-3 system calls for process, ABI, memory and file-descriptor introspection.
+
+### Syscall
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+
+### Userspace
+- Processes can query their current scheduler thread ID.
+- Processes can query the running NexusOS version and architecture.
+- Processes can inspect their userspace memory boundaries and heap bounds.
+- File-descriptor type, offset and flags can be queried without exposing kernel pointers.
+
+### Notes
+- Stability and freeze diagnostics from NexusOS 0.6.1 are preserved.
+- Expanded syscall ABI from NexusOS 0.6.2 is preserved.
+- The 0.6.x line remains focused on stability and platform hardening before the 0.7.x feature program.
+
+## NexusOS 0.6.2 — Expanded Userspace Syscall ABI
+
+### Added
+- Additional userspace system calls for process, environment, timing, memory and descriptor inspection.
+
+### Syscall
+- `GETCPUTICKS`
+- `GETSTARTTICK`
+- `GETUPTIME_MS`
+- `PROCESS_COUNT`
+- `ZOMBIE_COUNT`
+- `GETENV`
+- `SETENV`
+- `UNSETENV`
+- `FD_COUNT`
+- `MEMINFO`
+
+### Process
+- Userspace can query its CPU accounting and process start tick.
+- Userspace can query total and zombie process counts.
+- Userspace can manage its own environment variables.
+- Userspace can query its active file descriptor count.
+
+### Memory
+- Added a userspace memory information syscall returning total, free, used and process memory-limit bytes.
+
+### Notes
+- Stability work from NexusOS 0.6.1 is preserved.
+- Existing syscall validation, private CR3 isolation and safe process reaping are preserved.
+- The 0.6.x line remains focused on stability and platform hardening before the 0.7.x feature program.
+
+## NexusOS 0.6.2 — Stability and Freeze Diagnostics
+
+### Added
+- Kernel software watchdog for normal-context stall detection.
+- Bounded event-queue processing per main-loop pass.
+- Critical OS Stop trigger for confirmed normal-context stalls.
+
+### Scheduler
+- Watchdog time is sampled from the existing PIT tick path.
+- IRQ handlers remain capture-only.
+
+### Stability
+- Sustained keyboard/mouse event storms cannot monopolize normal context indefinitely.
+- A normal-context stall lasting longer than 3 seconds is escalated through Critical OS Stop.
+- No scheduler context switch or heavy recovery work is performed from IRQ context.
+
+### Notes
+- NexusOS 0.6.0 userspace and build-system work is preserved.
+- This release focuses on stability before the larger 0.7.x feature program.
+
+## NexusOS 0.6.0 — Critical OS Stop
+
+### Added
+- Dedicated `CRITICAL OS STOP` terminal state for unrecoverable kernel conditions.
+- Separate `critical_os_stop()` API in the kernel panic subsystem.
+- Critical-stop diagnostics preserve the existing safe 30-second reboot countdown.
+- Critical stop is visually distinct from the normal `KERNEL PANIC` path.
+
+### Notes
+- `KERNEL PANIC` remains available for CPU exceptions and fatal kernel faults.
+- `CRITICAL OS STOP` is a separate fatal-state interface for subsystem-level unrecoverable failures.
+- Existing IRQ capture-only rules remain unchanged.
+
+## NexusOS 0.6.0 — Display Modes and Buffered Framebuffer
+
+### Added
+- UEFI GOP mode enumeration and largest-area mode selection.
+- GOP mode index/count exposed through boot information.
+- Kernel-side GUI backbuffer for smoother rendering.
+- Software framebuffer present path.
+- Larger render surface independent of the firmware framebuffer stride.
+
+### Display
+- NexusOS now prefers the largest framebuffer mode exposed by UEFI GOP.
+- GUI renders into a separate backbuffer when enough kernel heap memory is available.
+- Backbuffer is presented to the firmware framebuffer after drawing.
+- Existing firmware framebuffer remains the hardware scanout surface.
+
+### Notes
+- UEFI GOP does not expose refresh rate in its basic mode information, so arbitrary refresh-rate switching is not claimed by this release.
+- Exact 60/75/120/144/165/240+ Hz selection requires GPU-specific display timing/modesetting support.
+- The buffered renderer reduces tearing/flicker and decouples rendering from the physical framebuffer stride.
+
 ## NexusOS 0.6.0 — Configurable Full Disk Image Size
 
 ### Added
@@ -622,3 +795,14 @@ NexusOS 0.5.12 adds the first bounded write path to the real FAT32/AHCI storage 
 - Added robust in-place shell parser with quoting and backslash escapes.
 - Added command sequencing (`;`) and conditional sequencing (`&&`).
 - Added parser-level recognition for pipelines and redirections, keeping unsupported execution explicit.
+
+## NexusOS 0.6.0 — Clean Shell Handoff Fix
+
+### Fixed
+- Startup service status lines are now emitted before interactive shell initialization.
+- The shell no longer starts with a stale `shell service 1.0 [  OK  ]` line in the input area.
+- Userspace, syscall and GUI startup statuses are completed before the shell prompt is drawn.
+- Interactive shell initialization remains responsible for clearing the visible boot log.
+
+### Notes
+- The boot log remains available through the existing scrollback buffer, while the live shell starts on a clean screen.

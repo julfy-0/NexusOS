@@ -517,6 +517,38 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
         panic(u"GOP not found - cannot continue without a framebuffer");
     }
 
+    /* Prefer the largest pixel-area GOP mode exposed by firmware. UEFI GOP
+     * does not expose refresh rate in EFI_GRAPHICS_OUTPUT_MODE_INFORMATION,
+     * so this is a mode-selection improvement, not a claim of arbitrary Hz
+     * support. Exact refresh-rate switching requires a GPU-specific driver. */
+    uint32_t selected_mode = gop->Mode->Mode;
+    uint64_t best_area = (uint64_t)gop->Mode->Info->HorizontalResolution *
+                       (uint64_t)gop->Mode->Info->VerticalResolution;
+    typedef EFI_STATUS (EFIAPI *gop_query_mode_fn)(EFI_GRAPHICS_OUTPUT_PROTOCOL *, uint32_t, UINTN *, EFI_GRAPHICS_OUTPUT_MODE_INFORMATION **);
+    typedef EFI_STATUS (EFIAPI *gop_set_mode_fn)(EFI_GRAPHICS_OUTPUT_PROTOCOL *, uint32_t);
+    gop_query_mode_fn query_mode = (gop_query_mode_fn)gop->QueryMode;
+    gop_set_mode_fn set_mode = (gop_set_mode_fn)gop->SetMode;
+    for (uint32_t mode = 0; mode < gop->Mode->MaxMode; ++mode) {
+        EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info = NULL;
+        UINTN info_size = 0;
+        EFI_STATUS q = query_mode(gop, mode, &info_size, &info);
+        if (EFI_ERROR(q) || info == NULL) continue;
+        uint64_t area = (uint64_t)info->HorizontalResolution * (uint64_t)info->VerticalResolution;
+        if (area > best_area) {
+            best_area = area;
+            selected_mode = mode;
+        }
+        g_bs->FreePool(info);
+    }
+    if (selected_mode != gop->Mode->Mode) {
+        EFI_STATUS sm = set_mode(gop, selected_mode);
+        if (EFI_ERROR(sm)) {
+            /* Keep firmware's current mode if the preferred mode cannot be
+             * selected. The current framebuffer remains a valid fallback. */
+            selected_mode = gop->Mode->Mode;
+        }
+    }
+
     boot_info->fb.base = gop->Mode->FrameBufferBase;
     boot_info->fb.size = gop->Mode->FrameBufferSize;
     boot_info->fb.width = gop->Mode->Info->HorizontalResolution;
@@ -530,6 +562,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     } else {
         boot_info->fb.pixel_format = NEXUS_PIXFMT_OTHER;
     }
+    boot_info->fb.mode_index = selected_mode;
+    boot_info->fb.mode_count = gop->Mode->MaxMode;
     if (boot_info->fb.pixel_format == NEXUS_PIXFMT_OTHER) {
         panic(u"Unsupported framebuffer pixel format");
     }

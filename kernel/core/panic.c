@@ -111,6 +111,22 @@ void panic_countdown_and_reboot(void) {
     panic_reboot();
 }
 
+void critical_os_stop(const char *message) {
+    __asm__ volatile ("cli");
+
+    console_set_color(COLOR_WHITE, 0x7A0000);
+    console_print("\n*** NexusOS CRITICAL OS STOP ***\n");
+    console_set_color(COLOR_WHITE, 0x000000);
+    console_print("The operating system entered a critical stop state.\n");
+    if (message != 0) {
+        console_print("Reason: ");
+        console_print(message);
+        console_print("\n");
+    }
+    console_print("All normal execution has been stopped.\n");
+    panic_countdown_and_reboot();
+}
+
 void panic(const char *message) {
     __asm__ volatile ("cli");
 

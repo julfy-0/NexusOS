@@ -1,3 +1,9 @@
+## NexusOS 0.6.2 — Stability and Freeze Diagnostics
+
+- Software watchdog for normal-context stalls.
+- Bounded event processing.
+- Critical OS Stop escalation for confirmed main-loop stalls.
+
 ### 0.5.36 — USB controller stability and keyboard safety
 
 - [x] Harden xHCI BIOS/OS ownership handoff with a bounded timeout

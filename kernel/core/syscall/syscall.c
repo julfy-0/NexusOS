@@ -6,6 +6,8 @@
 #include "vfs.h"
 #include "elf_loader.h"
 #include "usermode.h"
+#include "pmm.h"
+#include "nexus_version.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -121,6 +123,101 @@ uint64_t syscall_dispatch(uint64_t number, uint64_t a0, uint64_t a1, uint64_t a2
         case NEXUS_SYS_BRK: {
             uint64_t requested=a0; if(requested==0)return p->heap_end; if(requested<p->heap_base||requested>=PROCESS_USER_LIMIT)return(uint64_t)-1; uint64_t old=p->heap_end; if(requested>old){uint64_t pages=(requested-old+4095ULL)/4096ULL; uint64_t base=process_alloc_user_range(p->pid,pages,VMM_PAGE_WRITABLE|VMM_PAGE_NX); if(!base||base!=old)return(uint64_t)-1; p->heap_end=old+pages*4096ULL;} else if(requested<old){uint64_t cut=(old-requested+4095ULL)/4096ULL; uint64_t base=old-cut*4096ULL; if(!process_unmap_user_range(p->pid,base,cut*4096ULL))return(uint64_t)-1; p->heap_end=base;} return p->heap_end;
         }
+        case NEXUS_SYS_GETCPUTICKS: return process_cpu_ticks(p->pid);
+        case NEXUS_SYS_GETSTARTTICK: return process_start_tick(p->pid);
+        case NEXUS_SYS_GETUPTIME_MS: return scheduler_elapsed_ms();
+        case NEXUS_SYS_PROCESS_COUNT: return process_count();
+        case NEXUS_SYS_ZOMBIE_COUNT: return process_zombie_count();
+        case NEXUS_SYS_GETENV: {
+            if (a1 == 0 || a1 > PROCESS_ENV_VALUE_LEN || !process_user_range_valid(p->pid, a0, PROCESS_ENV_KEY_LEN, VMM_PAGE_WRITABLE) || !process_user_range_valid(p->pid, a2, a1, VMM_PAGE_WRITABLE)) return (uint64_t)-1;
+            char key[PROCESS_ENV_KEY_LEN], value[PROCESS_ENV_VALUE_LEN];
+            if (!process_user_read(p->pid, a0, key, sizeof(key))) return (uint64_t)-1;
+            key[sizeof(key)-1] = 0;
+            if (!process_get_env(p->pid, key, value, sizeof(value))) return (uint64_t)-1;
+            uint64_t len = 0; while (value[len] && len + 1 < a1) ++len;
+            return process_user_write(p->pid, a2, value, len + 1) ? len : (uint64_t)-1;
+        }
+        case NEXUS_SYS_SETENV: {
+            char key[PROCESS_ENV_KEY_LEN], value[PROCESS_ENV_VALUE_LEN];
+            if (!copy_user_string(p->pid, a0, key, sizeof(key)) || !copy_user_string(p->pid, a1, value, sizeof(value))) return (uint64_t)-1;
+            return process_set_env(p->pid, key, value) ? 0 : (uint64_t)-1;
+        }
+        case NEXUS_SYS_UNSETENV: {
+            char key[PROCESS_ENV_KEY_LEN];
+            if (!copy_user_string(p->pid, a0, key, sizeof(key))) return (uint64_t)-1;
+            return process_unset_env(p->pid, key) ? 0 : (uint64_t)-1;
+        }
+        case NEXUS_SYS_FD_COUNT: {
+            uint64_t n = 0;
+            for (uint64_t i = 0; i < PROCESS_MAX_FDS; ++i) if (p->fds[i].type != PROCESS_FD_UNUSED) ++n;
+            return n;
+        }
+        case NEXUS_SYS_MEMINFO: {
+            if (!process_user_range_valid(p->pid, a0, 4ULL * sizeof(uint64_t), VMM_PAGE_WRITABLE)) return (uint64_t)-1;
+            uint64_t info[4] = {
+                pmm_total_pages() * 4096ULL,
+                pmm_free_pages() * 4096ULL,
+                pmm_used_pages() * 4096ULL,
+                p->memory_limit_bytes
+            };
+            return process_user_write(p->pid, a0, info, sizeof(info)) ? 0 : (uint64_t)-1;
+        }
+
+        case NEXUS_SYS_GETTID:
+            return scheduler_current_thread_id();
+        case NEXUS_SYS_GETVERSION: {
+            if (a1 == 0 || a1 > 64 || !process_user_range_valid(p->pid, a0, a1, VMM_PAGE_WRITABLE)) return (uint64_t)-1;
+            const char *v = NEXUS_VERSION_STRING;
+            uint64_t len = 0; while (v[len] && len + 1 < a1) ++len;
+            return process_user_write(p->pid, a0, v, len + 1) ? len : (uint64_t)-1;
+        }
+        case NEXUS_SYS_GETARCH: {
+            if (a1 == 0 || a1 > 32 || !process_user_range_valid(p->pid, a0, a1, VMM_PAGE_WRITABLE)) return (uint64_t)-1;
+            const char *arch = "x86_64";
+            uint64_t len = 0; while (arch[len] && len + 1 < a1) ++len;
+            return process_user_write(p->pid, a0, arch, len + 1) ? len : (uint64_t)-1;
+        }
+        case NEXUS_SYS_GETPAGESIZE:
+            return 4096ULL;
+        case NEXUS_SYS_GETUSERBASE:
+            return PROCESS_USER_BASE;
+        case NEXUS_SYS_GETUSERLIMIT:
+            return PROCESS_USER_LIMIT;
+        case NEXUS_SYS_GETSTACKTOP:
+            return PROCESS_USER_STACK_TOP;
+        case NEXUS_SYS_GETHEAPBASE:
+            return p->heap_base;
+        case NEXUS_SYS_GETHEAPEND:
+            return p->heap_end;
+        case NEXUS_SYS_GETFDTYPE:
+            if (a0 >= PROCESS_MAX_FDS || p->fds[a0].type == PROCESS_FD_UNUSED) return (uint64_t)-1;
+            return (uint64_t)p->fds[a0].type;
+        case NEXUS_SYS_GETFDOFFSET:
+            if (a0 >= PROCESS_MAX_FDS || p->fds[a0].type == PROCESS_FD_UNUSED) return (uint64_t)-1;
+            return p->fds[a0].offset;
+        case NEXUS_SYS_GETFD_FLAGS:
+            if (a0 >= PROCESS_MAX_FDS || p->fds[a0].type == PROCESS_FD_UNUSED) return (uint64_t)-1;
+            return p->fds[a0].flags;
+        case NEXUS_SYS_GETQUANTUM_EXPIRATIONS:
+            return scheduler_quantum_expirations();
+        case NEXUS_SYS_GETCONTEXT_SWITCHES:
+            return scheduler_context_switches();
+        case NEXUS_SYS_GETTIMER_HZ:
+            return scheduler_timer_hz();
+        case NEXUS_SYS_GETQUANTUM_TICKS:
+            return scheduler_quantum_ticks();
+        case NEXUS_SYS_GETTHREAD_COUNT:
+            return scheduler_thread_count();
+        case NEXUS_SYS_GETMAX_THREADS:
+            return scheduler_max_threads();
+        case NEXUS_SYS_GETREADY_COUNT:
+            return scheduler_ready_count();
+        case NEXUS_SYS_GETSLEEPING_COUNT:
+            return scheduler_sleeping_count();
+        case NEXUS_SYS_GETTHREAD_SWITCHES:
+            return scheduler_thread_switches(a0);
+        case NEXUS_SYS_GETTHREAD_RUNTIME:
+            return scheduler_thread_runtime_ticks(a0);
 
         default: return (uint64_t)-1;
     }
