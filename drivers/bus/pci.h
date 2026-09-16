@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define PCI_MAX_DEVICES 64
+#define PCI_MAX_DEVICES 256
 
 typedef struct {
     uint8_t  bus, device, function;
@@ -27,6 +27,9 @@ int pci_find_class(uint8_t class_code, uint8_t subclass, uint8_t prog_if,
 
 /* Полный физический адрес PCI Memory BAR (32/64-bit). 0 = invalid/I/O BAR. */
 uint64_t pci_get_bar64(const nexus_pci_device_t *dev, int index);
+
+/* Counts devices matching a PCI class/subclass/programming-interface tuple. */
+int pci_count_class(uint8_t class_code, uint8_t subclass, uint8_t prog_if, int exact_prog_if);
 
 /* Включает PCI Memory Space и/или Bus Mastering. */
 void pci_enable_device(const nexus_pci_device_t *dev, int memory_space, int bus_master);

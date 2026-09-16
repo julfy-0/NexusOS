@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include "ehci.h"
 #include "pci.h"
+#include "paging.h"
 
 #define CLASS_USB 0x0C
 #define SUBCLASS_USB 0x03
@@ -44,6 +45,8 @@ int ehci_init(void){
     if(!pci_find_class(CLASS_USB,SUBCLASS_USB,PROGIF_EHCI,&d)) return 0;
     uint64_t bar=pci_get_bar64(&d,0); if(!bar)return 0;
     pci_enable_device(&d,1,1);
+    if(bar >= (512ULL*1024ULL*1024ULL*1024ULL)) return 0;
+    paging_map_region(bar, bar + 0x20000ULL);
     volatile uint8_t *cap=(volatile uint8_t *)(uintptr_t)bar;
     uint8_t caplen=cap[0];
     g_op=cap+caplen;

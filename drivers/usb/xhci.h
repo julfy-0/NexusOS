@@ -22,6 +22,14 @@ uint8_t xhci_connected_ports(void);
 /* 1 если во время init нашлась и настроилась HID boot keyboard. */
 int xhci_keyboard_present(void);
 int xhci_mouse_present(void);
+int xhci_controller_count(void);
+uint16_t xhci_vendor_id(void);
+uint16_t xhci_device_id(void);
+uint8_t xhci_pci_bus(void);
+uint8_t xhci_pci_device(void);
+uint8_t xhci_pci_function(void);
+uint64_t xhci_bar0(void);
+const char *xhci_last_error(void);
 
 /* Вызывается из kernel event loop. Проверяет event ring и, если там
  * появился завершённый interrupt transfer клавиатуры, разбирает HID boot

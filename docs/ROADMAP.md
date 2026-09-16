@@ -9,7 +9,7 @@ descent — импортированный проект принёс "archive" (
 
 ## NexusOS 0.5.2 → 0.6.0 master plan
 
-This is the active development roadmap. The current release baseline is **0.5.24 — Enstein**;
+This is the active development roadmap. The current release baseline is **0.5.28 — Enstein**;
 0.5.4 — Processes & Userspace Foundation is complete as a foundation milestone.
 0.5.5 — Shell & I/O Foundation is integrated.
 0.5.6 — Unified Input & USB HID is integrated.
@@ -360,6 +360,18 @@ complete. At that point the block receives a GitHub Release description.
 - [x] Non-blocking console output path
 - [ ] File-descriptor-backed userspace I/O
 
+### 0.5.28 — USB controller compatibility and graphics performance
+
+- [x] Harden USB PCI controller probing and diagnostics
+- [x] Report discovered PCI USB controllers when initialization fails
+- [x] Explicitly map EHCI/OHCI MMIO regions before register access
+- [x] Keep xHCI as the preferred controller backend
+- [x] Replace per-pixel GUI framebuffer primitives with row-based fast paths
+- [x] Add cached nearest-neighbor wallpaper coordinate maps
+- [x] Preserve and restore the cursor without redrawing the full desktop on every mouse move
+- [x] Keep UEFI GOP framebuffer as the active display backend for real hardware stability
+- [ ] Vendor-specific GPU command submission / hardware acceleration
+
 ### 0.5.24 — Per-process file descriptor foundation
 
 - [x] Fixed-size per-process file descriptor table
@@ -380,3 +392,15 @@ complete. At that point the block receives a GitHub Release description.
 - [x] User ELF image/stack initialization through process translations
 - [ ] Copy-on-write / shared memory
 - [ ] Page-fault-driven demand mapping
+
+### 0.5.29 — Multi-controller xHCI and Intel real-hardware USB bring-up
+
+- [x] Enumerate every PCI `0C:03:30` xHCI controller instead of stopping at the first match
+- [x] Attempt xHCI initialization on each detected controller until one starts successfully
+- [x] Increase the PCI device table capacity so real systems with many PCI functions do not hide USB controllers
+- [x] Expose active xHCI PCI BDF, vendor/device IDs and BAR0 for hardware diagnostics
+- [x] Report controller-specific xHCI initialization failures
+- [x] Keep the generic xHCI driver usable for multiple Intel USB 3.x controllers
+- [x] Keep USB 3.x root-port HID support on the active xHCI backend
+- [ ] USB4 Host Router / Thunderbolt fabric driver
+- [ ] Multi-controller HID aggregation across more than one active xHCI instance

@@ -25,3 +25,16 @@ USB version and host-controller interface are related but are not the same thing
 USB 1.x devices can be attached through UHCI/OHCI, USB 2.0 through EHCI, and USB 3.x
 through xHCI. Modern xHCI controllers can also manage USB 2.0/1.x devices through
 their supported protocol/root-port definitions.
+
+
+## Real-hardware xHCI bring-up (0.5.29)
+
+The xHCI driver now enumerates all PCI `0C:03:30` controllers and attempts
+initialization on each controller instead of stopping at the first match. This
+supports machines that expose two independent Intel USB 3.x/xHCI controllers.
+The active controller identity (PCI BDF, vendor/device ID and BAR0) is exposed
+for kernel diagnostics.
+
+USB4 Host Router devices are intentionally not treated as xHCI controllers: the
+existing xHCI driver handles standard USB 2/3 root ports, while USB4 fabric and
+Thunderbolt tunneling remain a separate future driver layer.

@@ -250,7 +250,23 @@ void kmain(nexus_boot_info_t *boot_info) {
         console_status_ok();
         console_print("  -> controller: ");
         console_print(usb_host_name());
-        console_print("\n  -> USB ports: ");
+        if (usb_host_type() == USB_HOST_XHCI) {
+            console_print(" (xHCI controllers: ");
+            console_print_dec(usb_xhci_controller_count());
+            console_print(")");
+            console_print("\n  -> active PCI: ");
+            console_print_dec(xhci_pci_bus());
+            console_print(":");
+            console_print_dec(xhci_pci_device());
+            console_print(".");
+            console_print_dec(xhci_pci_function());
+            console_print("\n  -> PCI vendor/device: ");
+            console_print_hex(xhci_vendor_id());
+            console_print("/");
+            console_print_hex(xhci_device_id());
+            console_print("\n");
+        }
+        console_print("  -> USB ports: ");
         console_print_dec(usb_port_count());
         console_print(", connected: ");
         console_print_dec(usb_connected_ports());
@@ -267,7 +283,16 @@ void kmain(nexus_boot_info_t *boot_info) {
         }
     } else {
         console_status_warn();
-        console_print("  -> no supported USB host controller found\n");
+        console_print("  -> PCI USB controllers found: ");
+        console_print_dec(usb_pci_controller_count());
+        console_print("; ");
+        console_print(usb_last_error());
+        if (usb_xhci_controller_count() > 0) {
+            console_print(" (xHCI: ");
+            console_print(xhci_last_error());
+            console_print(")");
+        }
+        console_print("\n");
     }
 
     console_print("Initializing Graphics subsystem");

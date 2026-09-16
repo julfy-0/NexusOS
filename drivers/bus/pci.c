@@ -77,6 +77,18 @@ void pci_scan(void) {
     }
 }
 
+
+int pci_count_class(uint8_t class_code, uint8_t subclass, uint8_t prog_if, int exact_prog_if) {
+    int count = 0;
+    for (int i = 0; i < g_device_count; i++) {
+        if (g_devices[i].class_code != class_code || g_devices[i].subclass != subclass) continue;
+        if (exact_prog_if && g_devices[i].prog_if != prog_if) continue;
+        if (!exact_prog_if && prog_if != 0xFFu && g_devices[i].prog_if != prog_if) continue;
+        count++;
+    }
+    return count;
+}
+
 int pci_get_device_count(void) {
     return g_device_count;
 }

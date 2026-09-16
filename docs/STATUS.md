@@ -1,4 +1,4 @@
-# NexusOS 0.5.23 — Enstein
+# NexusOS 0.5.29 — Enstein
 
 ## App Manager Foundation
 
@@ -108,6 +108,11 @@ CR3, copies it into a bounded kernel buffer, and emits the bytes through the
 existing console path.
 
 
+
+
+## 0.5.28 — USB controller compatibility and graphics performance
+
+NexusOS 0.5.28 hardens real-hardware USB bring-up with PCI controller diagnostics and explicit MMIO mapping for legacy EHCI/OHCI paths. The GUI framebuffer renderer now uses row-based drawing, cached wallpaper coordinate maps and cursor restoration so mouse movement does not trigger a full-screen redraw. UEFI GOP remains the active display backend; vendor-specific GPU acceleration remains future work.
 ## 0.5.24 — Per-process file descriptor foundation
 
 NexusOS 0.5.24 adds a fixed per-process descriptor table as the kernel-side
@@ -115,3 +120,8 @@ foundation for userspace file I/O. Every process receives stdin/stdout/stderr
 entries, the existing `WRITE` syscall resolves output through that table, and
 `CLOSE` can disable an open descriptor. Descriptor state is reset during safe
 process reaping; VFS-backed file objects and blocking stdin remain future work.
+
+
+## 0.5.29 — Multi-controller xHCI and Intel USB compatibility
+
+The USB subsystem now enumerates every PCI xHCI controller and attempts each controller in turn. The active backend exposes PCI BDF and vendor/device diagnostics for real-hardware bring-up. Standard Intel USB 3.x controllers use the same generic xHCI driver; USB4 Host Router support remains separate future work.

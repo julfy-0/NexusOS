@@ -30,43 +30,69 @@ static int g_term_len = 0;
 static const char *g_term_output = "Welcome to NexusOS Terminal";
 static uint64_t g_last_clock_second = (uint64_t)-1;
 static const char *g_gui_message = "Left/Right: select  Enter: open  Esc: return";
+static uint64_t g_fb_base;
+static uint32_t g_fb_stride;
+static int g_fb_bgr;
+static int g_cursor_visible;
+static int g_cursor_x;
+static int g_cursor_y;
+static uint32_t g_cursor_saved[16 * 16];
 
-static uint32_t pack(uint32_t rgb) {
-    uint8_t r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
-    if (fb->pixel_format == NEXUS_PIXFMT_BGR)
-        return b | ((uint32_t)g << 8) | ((uint32_t)r << 16);
-    return r | ((uint32_t)g << 8) | ((uint32_t)b << 16);
+static inline uint32_t pack(uint32_t rgb) {
+    uint8_t r = (uint8_t)(rgb >> 16), g = (uint8_t)(rgb >> 8), b = (uint8_t)rgb;
+    return g_fb_bgr ? ((uint32_t)b | ((uint32_t)g << 8) | ((uint32_t)r << 16))
+                    : ((uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)b << 16));
 }
 
-static uint32_t unpack(uint32_t pixel) {
-    uint8_t a = pixel & 255, b = (pixel >> 8) & 255, c = (pixel >> 16) & 255;
-    if (fb->pixel_format == NEXUS_PIXFMT_BGR)
-        return ((uint32_t)a << 16) | ((uint32_t)b << 8) | c;
-    return ((uint32_t)c << 16) | ((uint32_t)b << 8) | a;
+static inline uint32_t blend_word(uint32_t old, uint32_t src, uint8_t alpha) {
+    uint32_t ia = 255u - alpha;
+    uint32_t rb = ((((old & 0x00FF00FFu) * ia) + ((src & 0x00FF00FFu) * alpha)) >> 8) & 0x00FF00FFu;
+    uint32_t g  = ((((old & 0x0000FF00u) * ia) + ((src & 0x0000FF00u) * alpha)) >> 8) & 0x0000FF00u;
+    return rb | g;
 }
 
-static void px(int x, int y, uint32_t c) {
+static inline uint32_t *fb_row(uint32_t y) {
+    return (uint32_t *)(uintptr_t)(g_fb_base + (uint64_t)y * g_fb_stride);
+}
+
+static inline void px(int x, int y, uint32_t c) {
     if (!fb || x < 0 || y < 0 || (uint32_t)x >= fb->width || (uint32_t)y >= fb->height) return;
-    uint32_t *p = (uint32_t *)(uintptr_t)(fb->base + (uint64_t)y * fb->pixels_per_scanline * 4);
-    p[x] = pack(c);
+    fb_row((uint32_t)y)[x] = pack(c);
 }
 
-static void blend_px(int x, int y, uint32_t c, uint8_t alpha) {
+static inline void blend_px(int x, int y, uint32_t c, uint8_t alpha) {
     if (!fb || x < 0 || y < 0 || (uint32_t)x >= fb->width || (uint32_t)y >= fb->height) return;
-    uint32_t *p = (uint32_t *)(uintptr_t)(fb->base + (uint64_t)y * fb->pixels_per_scanline * 4);
-    uint32_t old = unpack(p[x]);
-    uint32_t r = (((c >> 16) & 255) * alpha + ((old >> 16) & 255) * (255 - alpha)) / 255;
-    uint32_t g = (((c >> 8) & 255) * alpha + ((old >> 8) & 255) * (255 - alpha)) / 255;
-    uint32_t b = ((c & 255) * alpha + (old & 255) * (255 - alpha)) / 255;
-    p[x] = pack((r << 16) | (g << 8) | b);
+    uint32_t *p = fb_row((uint32_t)y) + x;
+    *p = blend_word(*p, pack(c), alpha);
 }
 
 static void rect(int x, int y, int w, int h, uint32_t c) {
-    for (int j = 0; j < h; ++j) for (int i = 0; i < w; ++i) px(x + i, y + j, c);
+    if (!fb || w <= 0 || h <= 0) return;
+    uint32_t color = pack(c);
+    for (int j = 0; j < h; ++j) {
+        int yy = y + j;
+        if (yy < 0 || (uint32_t)yy >= fb->height) continue;
+        int x0 = x < 0 ? 0 : x, x1 = x + w;
+        if ((uint32_t)x1 > fb->width) x1 = (int)fb->width;
+        if (x0 >= x1) continue;
+        uint32_t *row = fb_row((uint32_t)yy);
+        for (int i = x0; i < x1; ++i) row[i] = color;
+    }
 }
 
 static void rect_alpha(int x, int y, int w, int h, uint32_t c, uint8_t alpha) {
-    for (int j = 0; j < h; ++j) for (int i = 0; i < w; ++i) blend_px(x + i, y + j, c, alpha);
+    if (!fb || w <= 0 || h <= 0) return;
+    if (alpha == 255) { rect(x,y,w,h,c); return; }
+    uint32_t src = pack(c);
+    for (int j = 0; j < h; ++j) {
+        int yy = y + j;
+        if (yy < 0 || (uint32_t)yy >= fb->height) continue;
+        int x0 = x < 0 ? 0 : x, x1 = x + w;
+        if ((uint32_t)x1 > fb->width) x1 = (int)fb->width;
+        if (x0 >= x1) continue;
+        uint32_t *row = fb_row((uint32_t)yy);
+        for (int i = x0; i < x1; ++i) row[i] = blend_word(row[i], src, alpha);
+    }
 }
 
 static void rounded_rect_alpha(int x, int y, int w, int h, int r, uint32_t c, uint8_t alpha) {
@@ -112,18 +138,30 @@ static void text_center(const char *s, int y, int scale, uint32_t color) {
     text_at(s, ((int)fb->width - text_width(s, scale)) / 2, y, scale, color);
 }
 
+static uint16_t g_wall_x[1920];
+static uint16_t g_wall_y[1200];
+static uint32_t g_wall_w_cached, g_wall_h_cached;
+
 static void draw_wallpaper(void) {
+    if (!fb) return;
+    if (fb->width > 1920 || fb->height > 1200) {
+        rect(0,0,(int)fb->width,(int)fb->height,0x000000);
+        return;
+    }
     const uint8_t *src = _binary_assets_wallpapers_nexus_default_rgb565_start;
-    for (uint32_t y = 0; y < fb->height; ++y) {
-        uint32_t sy = (uint64_t)y * WALLPAPER_H / fb->height;
-        for (uint32_t x = 0; x < fb->width; ++x) {
-            uint32_t sx = (uint64_t)x * WALLPAPER_W / fb->width;
-            uint32_t off = (sy * WALLPAPER_W + sx) * 2;
-            uint16_t v = (uint16_t)src[off] | ((uint16_t)src[off + 1] << 8);
-            uint32_t r = ((v >> 11) & 31) * 255 / 31;
-            uint32_t g = ((v >> 5) & 63) * 255 / 63;
-            uint32_t b = (v & 31) * 255 / 31;
-            px((int)x, (int)y, (r << 16) | (g << 8) | b);
+    if (g_wall_w_cached != fb->width || g_wall_h_cached != fb->height) {
+        for (uint32_t x=0;x<fb->width;x++) g_wall_x[x]=(uint16_t)((uint64_t)x*WALLPAPER_W/fb->width);
+        for (uint32_t y=0;y<fb->height;y++) g_wall_y[y]=(uint16_t)((uint64_t)y*WALLPAPER_H/fb->height);
+        g_wall_w_cached=fb->width; g_wall_h_cached=fb->height;
+    }
+    for (uint32_t y=0;y<fb->height;y++) {
+        uint32_t *row=fb_row(y);
+        uint32_t sy=g_wall_y[y];
+        for (uint32_t x=0;x<fb->width;x++) {
+            uint32_t off=(sy*WALLPAPER_W+g_wall_x[x])*2u;
+            uint16_t v=(uint16_t)src[off]|((uint16_t)src[off+1]<<8);
+            uint32_t r=((v>>11)&31u)*255u/31u, g=((v>>5)&63u)*255u/63u, b=(v&31u)*255u/31u;
+            row[x]=pack((r<<16)|(g<<8)|b);
         }
     }
 }
@@ -315,10 +353,27 @@ static void draw_files(void) {
     text_at("Up/Down: select  Enter: open  Backspace: up  Esc: desktop",x+18,y+h-28,1,0xAFA8BC);
 }
 
+static void cursor_erase(void) {
+    if (!g_cursor_visible || !fb) return;
+    for (int y=0;y<16;y++) {
+        int sy=g_cursor_y+y; if(sy<0 || (uint32_t)sy>=fb->height) continue;
+        uint32_t *row=fb_row((uint32_t)sy);
+        for (int x=0;x<16;x++) { int sx=g_cursor_x+x; if(sx<0 || (uint32_t)sx>=fb->width) continue; row[sx]=g_cursor_saved[y*16+x]; }
+    }
+    g_cursor_visible=0;
+}
+
 static void draw_cursor(void) {
+    if (!fb) return;
     int mx=mouse_get_x(), my=mouse_get_y();
+    cursor_erase();
+    for(int y=0;y<16;y++) for(int x=0;x<16;x++){
+        int sx=mx+x, sy=my+y;
+        g_cursor_saved[y*16+x]=(sx>=0&&sy>=0&&(uint32_t)sx<fb->width&&(uint32_t)sy<fb->height)?fb_row((uint32_t)sy)[sx]:0;
+    }
     for(int i=0;i<12;i++) for(int j=0;j<=i/2;j++) px(mx+j,my+i,0xFFFFFF);
     for(int i=0;i<12;i++) px(mx,my+i,0x1A1622);
+    g_cursor_x=mx; g_cursor_y=my; g_cursor_visible=1;
 }
 
 static void files_open_selected(void) {
@@ -341,7 +396,8 @@ static void terminal_execute(void) {
 
 void gui_init(nexus_framebuffer_t *f) {
     fb = f;
-    if (f) { mouse_set_screen_size(f->width, f->height); gui_window_manager_init((int)f->width, (int)f->height); }
+    g_cursor_visible = 0;
+    if (f) { g_fb_base=(uint64_t)f->base; g_fb_stride=f->pixels_per_scanline*4u; g_fb_bgr=(f->pixel_format==NEXUS_PIXFMT_BGR); mouse_set_screen_size(f->width, f->height); gui_window_manager_init((int)f->width, (int)f->height); }
     g_gui_active = 0;
     g_selected_app = 0;
 }
@@ -414,6 +470,7 @@ void gui_status(const char *text) {
 
 void gui_draw_desktop(void) {
     if (!fb) return;
+    cursor_erase();
     if (g_view == 1) { draw_terminal(); return; }
     if (g_view == 4) { draw_search(); return; }
     if (g_view == 3) { draw_files(); return; }
@@ -463,7 +520,7 @@ void gui_update(void) {
     uint64_t now = pit_get_uptime_seconds();
     int redraw = 0;
     int moved = mouse_has_moved();
-    if (moved) { mouse_clear_moved(); redraw = 1; }
+    if (moved) { mouse_clear_moved(); }
 
     int mx = mouse_get_x(), my = mouse_get_y();
     uint8_t buttons = mouse_get_buttons();
@@ -562,5 +619,6 @@ void gui_update(void) {
 
     if(now!=g_last_clock_second){g_last_clock_second=now;redraw=1;}
     if(redraw) gui_draw_desktop();
+    else if(moved && g_view==0) draw_cursor();
 }
 

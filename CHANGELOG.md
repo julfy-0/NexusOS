@@ -1,3 +1,60 @@
+## NexusOS 0.5.29 — Multi-Controller xHCI and Intel USB Compatibility
+
+### Added
+- Multi-controller xHCI detection.
+- Real-hardware PCI diagnostics for xHCI controllers.
+- Active xHCI PCI BDF, vendor/device ID and BAR reporting.
+- Controller-specific xHCI initialization diagnostics.
+
+### USB
+- All PCI `0C:03:30` xHCI controllers are now enumerated.
+- NexusOS no longer stops after the first detected xHCI controller.
+- Each detected xHCI controller is attempted until one initializes successfully.
+- The generic xHCI driver can operate with standard Intel USB 3.x controllers.
+- Existing USB 2/3 root-port and HID keyboard/mouse support remains on the active xHCI backend.
+
+### PCI
+- Increased PCI device table capacity for systems with many PCI functions.
+- Improved controller discovery on real hardware with multiple USB host controllers.
+
+### Diagnostics
+- USB startup now identifies the active xHCI PCI address.
+- Vendor/device IDs are printed for the active controller.
+- xHCI initialization failures report the failed stage instead of only reporting an unsupported USB controller.
+
+### Notes
+- USB4 Host Router / Thunderbolt fabric is detected by the platform but does not use the xHCI driver; dedicated USB4 support remains future work.
+- Graphics optimizations from NexusOS 0.5.28 are preserved.
+- Userspace shell and process/file-descriptor work remain unchanged.
+- Higher-half kernel work remains intentionally deferred to preserve boot stability.
+
+## NexusOS 0.5.28 — USB Controller Compatibility and Graphics Performance
+
+### Added
+- USB controller diagnostics for real hardware.
+- PCI USB controller count reporting.
+- Explicit MMIO mapping for EHCI/OHCI controller registers.
+- Fast row-based framebuffer drawing paths.
+- Cached wallpaper scaling coordinate maps.
+- Cursor save/restore rendering without full desktop redraw on pointer movement.
+
+### USB
+- USB initialization now reports whether PCI USB host controllers were detected.
+- xHCI remains the preferred controller backend.
+- EHCI/OHCI MMIO access is explicitly mapped before controller initialization.
+- Initialization failures now expose a useful hardware-side diagnostic instead of only `No supported USB controller`.
+
+### Graphics
+- Reworked the software framebuffer renderer to avoid per-pixel function overhead in rectangle drawing.
+- Alpha rectangles use packed-channel blending directly on framebuffer words.
+- Wallpaper scaling avoids repeated division inside the inner pixel loop.
+- Mouse movement no longer forces a full desktop redraw when the desktop state is unchanged.
+
+### Notes
+- UEFI GOP remains the active display backend for stable real-hardware output.
+- Vendor-specific GPU acceleration and modesetting remain future work.
+- The higher-half kernel remains intentionally deferred to preserve boot stability.
+
 ## NexusOS 0.5.24 — Per-Process File Descriptor Foundation
 
 ### Added

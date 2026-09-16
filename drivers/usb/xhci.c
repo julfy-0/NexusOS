@@ -78,6 +78,14 @@ static uint8_t g_connected;
 static int g_ready;
 static int g_kbd_present;
 static int g_mouse_present;
+static uint16_t g_vendor_id;
+static uint16_t g_device_id;
+static uint8_t g_pci_bus;
+static uint8_t g_pci_device;
+static uint8_t g_pci_function;
+static uint64_t g_bar0;
+static int g_xhci_controller_count;
+static const char *g_last_error = "xHCI controller not initialized";
 static uint8_t g_hid_protocol; /* 1 keyboard, 2 mouse */
 static uint8_t g_hid_report_len;
 
@@ -664,7 +672,7 @@ static int setup_hid_on_port(uint8_t port_index /* 0-based */) {
     return 1;
 }
 
-int xhci_init(void) {
+static int xhci_try_controller(const nexus_pci_device_t *dev) {
     g_ready = 0;
     g_kbd_present = 0;
     g_mouse_present = 0;
@@ -674,18 +682,23 @@ int xhci_init(void) {
     g_ports = 0;
     g_connected = 0;
 
-    pci_scan();
-
-    nexus_pci_device_t dev;
-    if (!pci_find_class(XHCI_CLASS, XHCI_SUBCLASS, XHCI_PROGIF, &dev)) {
+    if (!dev) {
+        g_last_error = "null xHCI controller descriptor";
         return 0;
     }
 
-    uint64_t bar = pci_get_bar64(&dev, 0);
-    if (bar == 0) return 0;
-    if (bar >= (512ULL * 1024ULL * 1024ULL * 1024ULL)) return 0;
+    g_vendor_id = dev->vendor_id;
+    g_device_id = dev->device_id;
+    g_pci_bus = dev->bus;
+    g_pci_device = dev->device;
+    g_pci_function = dev->function;
 
-    pci_enable_device(&dev, 1, 1);
+    uint64_t bar = pci_get_bar64(dev, 0);
+    if (bar == 0) { g_last_error = "xHCI BAR0 is invalid"; return 0; }
+    if (bar >= (512ULL * 1024ULL * 1024ULL * 1024ULL)) { g_last_error = "xHCI BAR0 is outside supported address space"; return 0; }
+    g_bar0 = bar;
+
+    pci_enable_device(dev, 1, 1);
 
     /* BAR может лежать вне всего, что уже замаплено paging_init()
      * (базовый диапазон, EFI memory map, framebuffer) — MMIO там не
@@ -699,7 +712,7 @@ int xhci_init(void) {
     uint32_t cap0 = mmio_read32(0x00);
     uint32_t caplength = cap0 & 0xFFu;
     uint32_t version = (cap0 >> 16) & 0xFFFFu;
-    if (caplength < 0x20u || caplength > 0xFFu || version == 0 || version == 0xFFFFu) return 0;
+    if (caplength < 0x20u || caplength > 0xFFu || version == 0 || version == 0xFFFFu) { g_last_error = "invalid xHCI capability registers"; return 0; }
 
     uint32_t hcsparams1 = mmio_read32(0x04);
     uint32_t hcsparams2 = mmio_read32(0x08);
@@ -708,7 +721,7 @@ int xhci_init(void) {
     uint32_t rtsoff = mmio_read32(0x18) & ~0x1Fu;
 
     g_ports = (uint8_t)((hcsparams1 >> 24) & 0xFFu);
-    if (g_ports > 127u) return 0;
+    if (g_ports > 127u) { g_last_error = "invalid xHCI root-port count"; return 0; }
 
     g_op_base = caplength;
     g_db_base = dboff;
@@ -721,13 +734,13 @@ int xhci_init(void) {
     uint32_t cmd = mmio_read32(g_op_base + 0x00);
     cmd &= ~XHCI_USBCMD_RS;
     mmio_write32(g_op_base + 0x00, cmd);
-    if (!wait_bit32(g_op_base + 0x04, XHCI_USBSTS_HCH, 1)) return 0;
+    if (!wait_bit32(g_op_base + 0x04, XHCI_USBSTS_HCH, 1)) { g_last_error = "xHCI did not halt before reset"; return 0; }
 
     /* Host Controller Reset. */
     cmd = mmio_read32(g_op_base + 0x00);
     mmio_write32(g_op_base + 0x00, cmd | XHCI_USBCMD_HCRST);
-    if (!wait_bit32(g_op_base + 0x00, XHCI_USBCMD_HCRST, 0)) return 0;
-    if (!wait_bit32(g_op_base + 0x04, XHCI_USBSTS_HCH, 1)) return 0;
+    if (!wait_bit32(g_op_base + 0x00, XHCI_USBCMD_HCRST, 0)) { g_last_error = "xHCI controller reset timed out"; return 0; }
+    if (!wait_bit32(g_op_base + 0x04, XHCI_USBSTS_HCH, 1)) { g_last_error = "xHCI did not return to halted state after reset"; return 0; }
 
     g_page_size = (mmio_read32(g_op_base + 0x08) & 0xFFFFu) << 12;
     if (g_page_size == 0) g_page_size = 4096;
@@ -739,7 +752,7 @@ int xhci_init(void) {
     mmio_write32(g_op_base + 0x38, max_slots);
 
     for (int i = 0; i < 256; i++) g_dcbaa[i] = 0;
-    if (!setup_scratchpad(hcsparams2)) return 0;
+    if (!setup_scratchpad(hcsparams2)) { g_last_error = "unsupported xHCI scratchpad requirement"; return 0; }
     mmio_write64(g_op_base + 0x30, (uint64_t)(uintptr_t)g_dcbaa);
 
     /* Command ring. */
@@ -776,6 +789,7 @@ int xhci_init(void) {
     }
 
     g_ready = 1;
+    g_last_error = "none";
 
     if (first_connected >= 0) {
         int hid_ok = setup_hid_on_port((uint8_t)first_connected);
@@ -791,7 +805,55 @@ int xhci_init(void) {
     return 1;
 }
 
+int xhci_init(void) {
+    g_ready = 0;
+    g_xhci_controller_count = 0;
+    g_last_error = "no xHCI controller";
+    g_vendor_id = g_device_id = 0;
+    g_pci_bus = g_pci_device = g_pci_function = 0;
+    g_bar0 = 0;
+
+    pci_scan();
+
+    for (int i = 0; i < pci_get_device_count(); ++i) {
+        const nexus_pci_device_t *dev = pci_get_device(i);
+        if (!dev) continue;
+        if (dev->class_code != XHCI_CLASS || dev->subclass != XHCI_SUBCLASS || dev->prog_if != XHCI_PROGIF) continue;
+        g_xhci_controller_count++;
+    }
+
+    if (g_xhci_controller_count == 0) {
+        g_last_error = "PCI scan found no xHCI controllers";
+        return 0;
+    }
+
+    /* Try every xHCI controller, not only the first match. This is important
+     * on real Intel systems which can expose two independent USB 3.x host
+     * controllers. The first controller that successfully starts becomes the
+     * active input backend. */
+    int seen = 0;
+    for (int i = 0; i < pci_get_device_count(); ++i) {
+        const nexus_pci_device_t *dev = pci_get_device(i);
+        if (!dev) continue;
+        if (dev->class_code != XHCI_CLASS || dev->subclass != XHCI_SUBCLASS || dev->prog_if != XHCI_PROGIF) continue;
+        seen++;
+        if (xhci_try_controller(dev)) return 1;
+        g_ready = 0;
+    }
+
+    if (seen > 0 && g_last_error[0] == '\0') g_last_error = "all detected xHCI controllers failed initialization";
+    return 0;
+}
+
 int xhci_is_ready(void) { return g_ready; }
+int xhci_controller_count(void) { return g_xhci_controller_count; }
+uint16_t xhci_vendor_id(void) { return g_vendor_id; }
+uint16_t xhci_device_id(void) { return g_device_id; }
+uint8_t xhci_pci_bus(void) { return g_pci_bus; }
+uint8_t xhci_pci_device(void) { return g_pci_device; }
+uint8_t xhci_pci_function(void) { return g_pci_function; }
+uint64_t xhci_bar0(void) { return g_bar0; }
+const char *xhci_last_error(void) { return g_last_error; }
 uint8_t xhci_port_count(void) { return g_ports; }
 uint8_t xhci_connected_ports(void) { return g_connected; }
 int xhci_keyboard_present(void) { return g_kbd_present; }

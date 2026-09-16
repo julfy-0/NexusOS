@@ -16,4 +16,8 @@ uint8_t usb_host_count(void);
 uint8_t usb_port_count(void);
 uint8_t usb_connected_ports(void);
 const char *usb_host_name(void);
+/* Diagnostics for real-hardware bring-up. */
+uint8_t usb_pci_controller_count(void);
+const char *usb_last_error(void);
+int usb_xhci_controller_count(void);
 #endif
