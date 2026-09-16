@@ -338,7 +338,10 @@ void scheduler_init(uint32_t timer_hz) {
 void scheduler_tick_irq(void) {
     if (!g_ready) return;
     g_ticks++;
-    if (g_current != NULL) g_current->runtime_ticks++;
+    if (g_current != NULL) {
+        g_current->runtime_ticks++;
+        if (g_current->process_pid) process_account_cpu_tick(g_current->process_pid);
+    }
     if (g_quantum_remaining > 0) g_quantum_remaining--;
     if (g_quantum_remaining == 0) {
         g_quantum_expirations++;
@@ -577,4 +580,8 @@ uint64_t scheduler_thread_switches(uint64_t id) {
 uint64_t scheduler_thread_runtime_ticks(uint64_t id) {
     for (uint32_t i = 0; i < SCHED_MAX_THREADS; i++) if (g_tcbs[i].magic == THREAD_MAGIC && g_tcbs[i].id == id) return g_tcbs[i].runtime_ticks;
     return 0;
+}
+
+void scheduler_process_accounting_tick(uint64_t pid) {
+    if (pid) process_account_cpu_tick(pid);
 }

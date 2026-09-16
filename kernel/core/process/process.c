@@ -44,6 +44,15 @@ uint64_t process_create(uint64_t parent_pid) {
             p->pid = g_next_pid++;
             if (p->pid == PROCESS_INVALID_PID) p->pid = g_next_pid++;
             p->parent_pid = parent_pid;
+            p->start_tick = scheduler_ticks();
+            p->cpu_ticks = 0;
+            p->heap_base = 0x0000000010000000ULL;
+            p->heap_end = p->heap_base;
+            p->memory_limit_bytes = 0;
+            p->priority = 16;
+            p->env_count = 0;
+            p->name[0] = 0;
+            p->cwd[0] = '/'; p->cwd[1] = 0;
             p->address_space_cr3 = paging_create_address_space();
             if (p->address_space_cr3 == 0) {
                 p->state = PROCESS_UNUSED;
@@ -66,10 +75,13 @@ uint64_t process_create(uint64_t parent_pid) {
                 p->fds[j].type = PROCESS_FD_UNUSED;
                 p->fds[j].flags = 0;
                 p->fds[j].object = 0;
+                p->fds[j].offset = 0; p->fds[j].path[0] = 0;
             }
             p->fds[0].type = PROCESS_FD_STDIN_CONSOLE;
             p->fds[1].type = PROCESS_FD_STDOUT_CONSOLE;
             p->fds[2].type = PROCESS_FD_STDERR_CONSOLE;
+            p->fds[0].offset = p->fds[1].offset = p->fds[2].offset = 0;
+            p->fds[0].path[0] = p->fds[1].path[0] = p->fds[2].path[0] = 0;
             p->exit_code = 0;
             p->exit_reason = 0;
             p->flags = 0;
@@ -172,7 +184,7 @@ int process_reap(uint64_t pid, uint64_t scheduler_thread_id) {
     for (uint64_t j = 0; j < PROCESS_MAX_FDS; ++j) {
         p->fds[j].type = PROCESS_FD_UNUSED;
         p->fds[j].flags = 0;
-        p->fds[j].object = 0;
+        p->fds[j].object = 0; p->fds[j].offset = 0; p->fds[j].path[0] = 0;
     }
     p->user_entry = 0;
     p->user_stack_base = 0;
@@ -180,6 +192,8 @@ int process_reap(uint64_t pid, uint64_t scheduler_thread_id) {
     p->exit_code = 0;
     p->exit_reason = 0;
     p->parent_pid = 0;
+    p->start_tick = 0; p->cpu_ticks = 0; p->heap_base = 0; p->heap_end = 0; p->memory_limit_bytes = 0; p->priority = 0; p->env_count = 0;
+    p->name[0] = 0; p->cwd[0] = 0;
     p->pid = PROCESS_INVALID_PID;
     p->flags = 0;
     p->state = PROCESS_UNUSED;
@@ -404,6 +418,10 @@ int process_fd_is_writable(uint64_t pid, uint64_t fd) {
            p->fds[fd].type == PROCESS_FD_STDERR_CONSOLE;
 }
 
+#include "vfs.h"
+
+static void local_copy(char *dst, const char *src, uint64_t cap);
+
 int process_fd_close(uint64_t pid, uint64_t fd) {
     nexus_process_t *p = process_get(pid);
     if (!p || p->state == PROCESS_ZOMBIE || fd >= PROCESS_MAX_FDS ||
@@ -411,5 +429,109 @@ int process_fd_close(uint64_t pid, uint64_t fd) {
     p->fds[fd].type = PROCESS_FD_UNUSED;
     p->fds[fd].flags = 0;
     p->fds[fd].object = 0;
+    p->fds[fd].offset = 0;
+    p->fds[fd].path[0] = 0;
     return 1;
+}
+
+int process_fd_open(uint64_t pid, const char *path, uint32_t flags) {
+    nexus_process_t *p=process_get(pid); if(!p||p->state==PROCESS_ZOMBIE||!path||!path[0]) return -1;
+    int fd=-1; for(int i=0;i<PROCESS_MAX_FDS;i++) if(p->fds[i].type==PROCESS_FD_UNUSED){fd=i;break;}
+    if(fd<0) return -1;
+    uint64_t size=0; int exists=(vfs_file_size_path(path,&size)==0);
+    if(!exists && !(flags&4u)) return -1;
+    if(!exists && (flags&4u)){ static const uint8_t empty[1]={0}; if(vfs_write_path(path,empty,0,0,0)<0) return -1; }
+    if((flags&8u)){ static const uint8_t empty[1]={0}; if(vfs_write_path(path,empty,0,0,0)<0) return -1; size=0; }
+    p->fds[fd].type=PROCESS_FD_VFS_FILE; p->fds[fd].flags=flags; p->fds[fd].object=0; p->fds[fd].offset=(flags&16u)?size:0;
+    local_copy(p->fds[fd].path,path,sizeof(p->fds[fd].path)); return fd;
+}
+
+int process_fd_read(uint64_t pid,uint64_t fd,void *buffer,uint64_t size){ nexus_process_t*p=process_get(pid); if(!p||fd>=PROCESS_MAX_FDS||p->fds[fd].type!=PROCESS_FD_VFS_FILE||!buffer||size==0)return -1; uint64_t n=0; if(vfs_read_path(p->fds[fd].path,(uint8_t*)buffer,size,p->fds[fd].offset,&n)<0)return -1; p->fds[fd].offset+=n; return (int)n; }
+int process_fd_write(uint64_t pid,uint64_t fd,const void *buffer,uint64_t size){ nexus_process_t*p=process_get(pid); if(!p||fd>=PROCESS_MAX_FDS||p->fds[fd].type!=PROCESS_FD_VFS_FILE||!(p->fds[fd].flags&2u)||!buffer)return -1; uint64_t n=0; if(vfs_write_path(p->fds[fd].path,(const uint8_t*)buffer,size,p->fds[fd].offset,&n)<0)return -1; p->fds[fd].offset+=n; return (int)n; }
+int process_fd_seek(uint64_t pid,uint64_t fd,int64_t off,uint32_t whence,uint64_t*out){ nexus_process_t*p=process_get(pid); if(!p||fd>=PROCESS_MAX_FDS||p->fds[fd].type!=PROCESS_FD_VFS_FILE)return 0; uint64_t size=0; if(vfs_file_size_path(p->fds[fd].path,&size)<0)return 0; int64_t base=(whence==0)?0:(whence==1?(int64_t)p->fds[fd].offset:(int64_t)size); int64_t pos=base+off; if(pos<0)return 0; p->fds[fd].offset=(uint64_t)pos; if(out)*out=(uint64_t)pos; return 1; }
+int process_fd_tell(uint64_t pid,uint64_t fd,uint64_t*out){ nexus_process_t*p=process_get(pid); if(!p||fd>=PROCESS_MAX_FDS||p->fds[fd].type!=PROCESS_FD_VFS_FILE)return 0; if(out)*out=p->fds[fd].offset; return 1; }
+
+/* 0.6.0 process metadata / FD extensions. */
+static void local_copy(char *dst, const char *src, uint64_t cap) {
+    if (!dst || cap == 0) return;
+    uint64_t i = 0;
+    if (src) while (src[i] && i + 1 < cap) { dst[i] = src[i]; ++i; }
+    dst[i] = 0;
+}
+static int local_eq(const char *a, const char *b) {
+    if (!a || !b) return 0;
+    while (*a || *b) { if (*a++ != *b++) return 0; }
+    return 1;
+}
+
+int process_set_name(uint64_t pid, const char *name) {
+    nexus_process_t *p = process_get(pid);
+    if (!p || p->state == PROCESS_ZOMBIE || !name || !name[0]) return 0;
+    local_copy(p->name, name, PROCESS_NAME_LEN);
+    return 1;
+}
+int process_get_name(uint64_t pid, char *out, uint64_t size) {
+    nexus_process_t *p = process_get(pid);
+    if (!p || !out || size == 0) return 0;
+    local_copy(out, p->name, size); return 1;
+}
+int process_set_priority(uint64_t pid, uint32_t priority) {
+    nexus_process_t *p = process_get(pid);
+    if (!p || p->state == PROCESS_ZOMBIE || priority > 31) return 0;
+    p->priority = priority; return 1;
+}
+uint32_t process_get_priority(uint64_t pid) {
+    nexus_process_t *p = process_get(pid); return p ? p->priority : 0;
+}
+int process_set_env(uint64_t pid, const char *key, const char *value) {
+    nexus_process_t *p = process_get(pid);
+    if (!p || p->state == PROCESS_ZOMBIE || !key || !key[0]) return 0;
+    for (uint32_t i=0;i<p->env_count;i++) if (local_eq(p->env[i].key,key)) { local_copy(p->env[i].value,value?value:"",PROCESS_ENV_VALUE_LEN); return 1; }
+    if (p->env_count >= PROCESS_ENV_COUNT) return 0;
+    local_copy(p->env[p->env_count].key,key,PROCESS_ENV_KEY_LEN);
+    local_copy(p->env[p->env_count].value,value?value:"",PROCESS_ENV_VALUE_LEN);
+    p->env_count++; return 1;
+}
+int process_unset_env(uint64_t pid, const char *key) {
+    nexus_process_t *p = process_get(pid); if (!p || !key) return 0;
+    for (uint32_t i=0;i<p->env_count;i++) if (local_eq(p->env[i].key,key)) {
+        for (uint32_t j=i+1;j<p->env_count;j++) p->env[j-1]=p->env[j];
+        p->env_count--; return 1;
+    }
+    return 0;
+}
+int process_get_env(uint64_t pid, const char *key, char *out, uint64_t size) {
+    nexus_process_t *p = process_get(pid); if (!p || !key || !out || size==0) return 0;
+    for (uint32_t i=0;i<p->env_count;i++) if (local_eq(p->env[i].key,key)) { local_copy(out,p->env[i].value,size); return 1; }
+    out[0]=0; return 0;
+}
+int process_get_cwd(uint64_t pid, char *out, uint64_t size) {
+    nexus_process_t *p = process_get(pid); if (!p || !out || size==0) return 0; local_copy(out,p->cwd,size); return 1;
+}
+int process_set_cwd(uint64_t pid, const char *cwd) {
+    nexus_process_t *p = process_get(pid); if (!p || p->state==PROCESS_ZOMBIE || !cwd || cwd[0]!='/') return 0; local_copy(p->cwd,cwd,PROCESS_CWD_LEN); return 1;
+}
+void process_account_cpu_tick(uint64_t pid) { nexus_process_t *p=process_get(pid); if (p && p->state==PROCESS_RUNNING) p->cpu_ticks++; }
+uint64_t process_cpu_ticks(uint64_t pid) { nexus_process_t *p=process_get(pid); return p?p->cpu_ticks:0; }
+uint64_t process_start_tick(uint64_t pid) { nexus_process_t *p=process_get(pid); return p?p->start_tick:0; }
+
+int process_unmap_user_range(uint64_t pid, uint64_t base, uint64_t size) {
+    nexus_process_t *p=process_get(pid); if(!p||size==0||(base&(PAGE_SIZE-1))||(size&(PAGE_SIZE-1)))return 0;
+    uint64_t end=base+size; if(end<base)return 0;
+    for(uint64_t i=0;i<p->user_page_count;) {
+        uint64_t va=p->user_page_va[i];
+        if(va>=base&&va<end){ uint64_t phys=p->user_page_phys[i]; if(p->address_space_cr3)paging_unmap_page_in_cr3(p->address_space_cr3,va); if(phys)pmm_free_page(phys);
+            uint64_t last=p->user_page_count-1; p->user_page_va[i]=p->user_page_va[last]; p->user_page_phys[i]=p->user_page_phys[last]; p->user_page_flags[i]=p->user_page_flags[last]; p->user_page_count--; continue; }
+        ++i;
+    }
+    return 1;
+}
+
+uint64_t process_alloc_user_range(uint64_t pid, uint64_t pages, uint64_t flags) {
+    nexus_process_t *p=process_get(pid); if(!p||p->state==PROCESS_ZOMBIE||pages==0) return 0;
+    if(p->user_page_count+pages>PROCESS_USER_MAX_PAGES) return 0;
+    uint64_t base=p->heap_end; if(base<PROCESS_USER_BASE||base>=PROCESS_USER_LIMIT) base=0x0000000010000000ULL;
+    uint64_t bytes=pages*PAGE_SIZE; if(bytes/pages!=PAGE_SIZE||base>PROCESS_USER_LIMIT-bytes)return 0;
+    for(uint64_t i=0;i<pages;i++) if(!process_map_user_page(pid,base+i*PAGE_SIZE,flags)) { process_unmap_user_range(pid,base,i*PAGE_SIZE); return 0; }
+    p->heap_end=base+bytes; return base;
 }

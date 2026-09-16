@@ -1,3 +1,4 @@
+#include <stdint.h>
 #ifndef NEXUSOS_VFS_H
 #define NEXUSOS_VFS_H
 
@@ -91,3 +92,12 @@ char *vfs_split_word(char *s);
  * printing to the console. Names are copied into caller-owned buffers. */
 int vfs_gui_list(char names[][VFS_NAME_LEN], unsigned char is_dir[], int max_entries);
 void vfs_gui_getcwd(char *out, int out_size);
+
+/* 0.6.0 path/descriptor backend helpers. */
+int vfs_read_path(const char *path, uint8_t *buffer, uint64_t capacity, uint64_t offset, uint64_t *out_read);
+int vfs_write_path(const char *path, const uint8_t *buffer, uint64_t size, uint64_t offset, uint64_t *out_written);
+int vfs_file_size_path(const char *path, uint64_t *out_size);
+int vfs_is_dir_path(const char *path);
+int vfs_mkdir_path(const char *path);
+int vfs_unlink_path(const char *path);
+int vfs_rename_path(const char *src, const char *dst);

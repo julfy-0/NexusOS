@@ -1,3 +1,106 @@
+## NexusOS 0.6.0 — Configurable Full Disk Image Size
+
+### Added
+- `build.sh --size` now controls the complete `NexusOS.img` size.
+- Minimum supported image size reduced to 192 MiB.
+- Long size suffixes `MB`, `GB`, and `TB` are accepted alongside `M`, `G`, and `T`.
+- USERDATA automatically consumes the remaining image capacity after fixed BOOT and SYSTEM partitions and GPT metadata.
+
+### Build System
+- Removed the need to specify a separate USERDATA size for normal image creation.
+- Interactive image-size prompt now defaults to 192MB.
+- Image-size validation is shared between the shell frontend and Python image builder.
+
+### Notes
+- `NexusOS.img` remains generated in the project root.
+- BOOT and SYSTEM remain 64 MiB each.
+- The requested size is the final on-disk image size, not the USERDATA partition size.
+
+
+## NexusOS 0.6.0 — Unified Build Entrypoint
+
+### Build System
+- Consolidated project shell entrypoints into a single `build.sh`.
+- `build.sh` now handles compilation, GPT/FAT32 image creation, ISO creation and optional QEMU launch.
+- Interactive prompts ask whether to create `NexusOS.img`, its size, whether to create `NexusOS.iso`, and whether to launch NexusOS.
+- Image sizes accept MB, GB and TB suffixes.
+- `NexusOS.img` remains in the project root by default.
+
+### Cleanup
+- Removed standalone `create-img.sh`, `create-iso.sh` and `run.sh` entrypoints.
+- Removed the obsolete shell image-builder wrapper; image generation now uses `tools/create_image.py` from `build.sh`.
+## NexusOS 0.6.0 — Build and Image Integration Update
+
+### Added
+- Disk-image creation is now part of `build.sh`.
+- `build.sh --image-only` can rebuild the root `NexusOS.img` without recompiling sources.
+- Total image size can be selected with `--size` using `M`, `G`, or `T`.
+- USERDATA size can be selected with `--userdata`.
+- `run.sh --rebuild --size ...` now routes image creation through `build.sh`.
+
+### Build
+- Normal `./build.sh` now builds the kernel/UEFI payload and creates the GPT/FAT32 image and standalone ISO in one command.
+- `NexusOS.img` defaults to the project root.
+- `NexusOS.iso` defaults to the project root.
+
+### Compatibility
+- `create-img.sh` remains as a compatibility wrapper for existing scripts and automation.
+- Existing image layout and verification logic are preserved.
+
+## NexusOS 0.6.0 — Root disk image launcher and configurable image sizes
+
+### Added
+- `run.sh` now uses `NexusOS.img` from the project root by default.
+- Added `--size` support to `run.sh` and `create-img.sh`.
+- Image sizes accept `M`, `G`, and `T` suffixes.
+
+### Image
+- `--size` describes the total GPT disk image size.
+- BOOT and SYSTEM partitions remain fixed at 64 MiB each.
+- Remaining capacity is assigned to USERDATA.
+- Existing `--userdata` support remains available for compatibility.
+
+### Notes
+- Existing ISO and disk-image workflows are preserved.
+- Root-image launching no longer defaults to `build/fat.img`.
+
+## NexusOS 0.6.0 — Enstein — Platform Integration Update
+
+### Added
+- Expanded Ring-3 process ABI for process metadata, file I/O, process enumeration and child execution.
+- Per-process names, priorities, CPU accounting, start-tick accounting and working-directory metadata.
+- Expanded per-process descriptor table with VFS-backed file descriptors and independent offsets.
+- Path-oriented VFS read/write/stat/directory/rename helpers.
+- `OPEN`, `READ`, `WRITE`, `CLOSE`, `SEEK`, `TELL`, `STAT`, `MKDIR`, `RMDIR`, `UNLINK`, `RENAME`, `GETCWD`, `CHDIR`, `PROCESS_ENUM`, `WAITPID`, `EXEC`, `MMAP`, `MUNMAP` and `BRK` syscall paths.
+- Scheduler-driven per-process CPU tick accounting.
+- Embedded Roboto Regular/Bold font assets and font service foundation.
+
+### Userspace
+- Child process creation through the `EXEC` syscall path.
+- Non-blocking zombie discovery through `WAITPID`.
+- Process inspection data now includes parent relationship, priority and CPU accounting.
+- Userspace memory growth and mapping foundation extends the existing private-CR3 model.
+
+### VFS
+- Descriptor-backed file offsets.
+- Path normalization for descriptor I/O.
+- RAM-VFS and mounted FAT32 integration for descriptor read/write paths.
+- File size and directory queries available through the syscall ABI.
+
+### Memory
+- User-range allocation foundation for anonymous mappings.
+- Range unmapping for individual user mappings.
+- `BRK`-style userspace heap growth/shrink foundation.
+
+### Stability
+- Existing private CR3, syscall-frame validation, zombie-safe reaping and xHCI recovery paths remain preserved.
+- No higher-half migration is introduced.
+
+### Notes
+- The 128+ feature and 200+ hardening target remains a living 0.6.0 scope.
+- Only implemented and statically validated functionality is described here as complete.
+- Runtime validation on physical USB/GPU hardware still requires the user's real machine.
+
 ## NexusOS 0.5.37 — Shell Identity and Hardware Hostname
 
 ### Added

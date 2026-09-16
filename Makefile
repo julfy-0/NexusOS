@@ -1,4 +1,4 @@
-# NexusOS 0.5.37 — Enstein
+# NexusOS 0.6.0 — Enstein
 #
 # This Makefile is the single source of truth for compilation and linking.
 # build.sh is only a progress/UX frontend around the real targets below.
@@ -12,7 +12,7 @@ OBJCOPY ?= objcopy
 
 BUILD  := build
 ISODIR := iso
-NEXUS_VERSION ?= 0.5.37
+NEXUS_VERSION ?= 0.6.0
 ISO_IMAGE := $(BUILD)/NexusOS-$(NEXUS_VERSION).iso
 
 # -----------------------------------------------------------------------------
@@ -51,7 +51,9 @@ KERNEL_S_OBJS := $(patsubst %.S,$(BUILD)/%.o,$(KERNEL_S_SRCS))
 DRIVER_OBJS   := $(patsubst %.c,$(BUILD)/%.o,$(DRIVER_C_SRCS))
 
 WALLPAPER_OBJ := $(BUILD)/assets/wallpapers/nexus_default.o
-KERNEL_OBJS   := $(KERNEL_S_OBJS) $(KERNEL_C_OBJS) $(WALLPAPER_OBJ)
+FONT_REGULAR_OBJ := $(BUILD)/assets/fonts/Roboto-Regular.o
+FONT_BOLD_OBJ := $(BUILD)/assets/fonts/Roboto-Bold.o
+KERNEL_OBJS   := $(KERNEL_S_OBJS) $(KERNEL_C_OBJS) $(WALLPAPER_OBJ) $(FONT_REGULAR_OBJ) $(FONT_BOLD_OBJ)
 
 # lib/memory/mem.c is intentionally compiled twice: once for UEFI and once
 # for the kernel, producing different objects in different output paths.
@@ -108,6 +110,18 @@ $(WALLPAPER_OBJ): assets/wallpapers/nexus_default.rgb565 | $(BUILD)
 		--rename-section .data=.rodata,alloc,load,readonly,data,contents \
 		$< $@
 
+$(FONT_REGULAR_OBJ): assets/fonts/Roboto-Regular.ttf | $(BUILD)
+	@mkdir -p $(dir $@)
+	$(OBJCOPY) -I binary -O elf64-x86-64 -B i386:x86-64 \
+		--rename-section .data=.rodata,alloc,load,readonly,data,contents \
+		$< $@
+
+$(FONT_BOLD_OBJ): assets/fonts/Roboto-Bold.ttf | $(BUILD)
+	@mkdir -p $(dir $@)
+	$(OBJCOPY) -I binary -O elf64-x86-64 -B i386:x86-64 \
+		--rename-section .data=.rodata,alloc,load,readonly,data,contents \
+		$< $@
+
 # Real driver target: all driver source files have to produce their objects.
 drivers: $(DRIVER_OBJS)
 	@echo "==> Drivers: $(words $(DRIVER_OBJS)) object(s) ready"
@@ -123,7 +137,7 @@ kernel: $(KERNEL_OBJS)
 # -----------------------------------------------------------------------------
 
 # "system" is deliberately a real target rather than a fake progress phase:
-# it creates the actual files consumed by create-img.sh and the UEFI boot path.
+# it creates the actual files consumed by build.sh and the UEFI boot path.
 system: $(SYSTEM_OUTPUTS)
 	@echo "==> System staging: $(ISODIR)/"
 
@@ -150,7 +164,7 @@ iso: $(ISO_IMAGE)
 # -----------------------------------------------------------------------------
 
 run: iso
-	./run.sh --iso $(ISO_IMAGE)
+	./build.sh --no-prompt --run --no-img --iso-out $(ISO_IMAGE)
 
 # -----------------------------------------------------------------------------
 # Validation

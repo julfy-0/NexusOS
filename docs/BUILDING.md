@@ -70,34 +70,45 @@ NexusOS содержит собственный dependency-free генерато
   это ДРУГОЙ путь чтения — сам NexusOS его не видит через свой
   AHCI-драйвер, только UEFI видел его на этапе загрузчика)
 
-## Creating release media with `create-img.sh`
+## Creating release media with `build.sh`
 
-`create-img.sh` now creates both release media formats from the same build artifacts:
+`build.sh` now creates both release media formats from the same build artifacts:
 
 ```bash
 ./build.sh
-./create-img.sh
+./build.sh
 ```
 
 Outputs:
 
 - `NexusOS.img` — GPT disk image with BOOT, SYSTEM and USERDATA partitions.
+
+You can also set the total image size directly with `--size`, using `M`, `G`, or `T`, for example `--size 4G` or `--size 1T`. The fixed BOOT and SYSTEM partitions consume 128 MiB; the remaining space becomes USERDATA.
 - `NexusOS.iso` — bootable ISO9660/El Torito EFI image suitable for VMware.
 
 The paths can be changed independently:
 
 ```bash
-./create-img.sh --userdata 1G --out NexusOS.img --iso-out NexusOS.iso
+./build.sh --size 4G --out NexusOS.img --iso-out NexusOS.iso
+
+For the QEMU launcher, `build.sh` now uses the project-root `NexusOS.img` by default. You can rebuild it at any supported size:
+
+```bash
+./build.sh --rebuild --size 4G
+./build.sh --rebuild --size 1T
 ```
 
-## Creating only the ISO with `create-iso.sh`
+The image-size parser accepts `M`, `G`, and `T` suffixes (for example `512M`, `4G`, `1T`). The requested size is the total GPT image size; BOOT and SYSTEM remain fixed at 64 MiB each and the remaining capacity is assigned to USERDATA.
+```
+
+## Creating only the ISO with `build.sh`
 
 If you only need a bootable ISO, without creating the GPT disk image, use the
 standalone ISO creator:
 
 ```bash
 ./build.sh
-./create-iso.sh
+./build.sh
 ```
 
 This creates:
@@ -109,9 +120,9 @@ NexusOS.iso
 Custom output path:
 
 ```bash
-./create-iso.sh --out build/NexusOS-custom.iso
+./build.sh --out build/NexusOS-custom.iso
 ```
 
-`create-iso.sh` uses the already-built `build/BOOTX64.EFI` and
+`build.sh` uses the already-built `build/BOOTX64.EFI` and
 `build/kernel.elf`; it does not rebuild the kernel or bootloader and does not
 create `NexusOS.img`.

@@ -273,7 +273,14 @@ the existing VFS. File descriptors and persistent writable FAT32 remain future w
 - [ ] Process/file permissions foundation
 - [ ] Syscall validation
 
-### 0.6.0 — Integration release
+### 0.6.0 — Mega integration release
+
+- [x] Version line and release tooling moved to 0.6.0
+- [x] Compact colored startup status format `[  OK  ]` / `[ FAIL ]`
+- [x] Built-in Roboto Regular/Bold font assets and font service foundation
+- [x] Driver/service inspection shell commands (`modules`, `services`, `fontinfo`, `ps`, `free`, `hostname`, `arch`)
+- [ ] 128+ new capabilities target — see `docs/0.6.0_PLAN.md`
+- [ ] 200+ fixes/hardening target — see `docs/0.6.0_PLAN.md`
 
 - [ ] All previous milestones integrated
 - [ ] Stable boot flow

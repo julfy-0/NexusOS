@@ -48,5 +48,6 @@ uint32_t scheduler_sleeping_count(void);
 uint64_t scheduler_current_thread_id(void);
 uint64_t scheduler_thread_switches(uint64_t id);
 uint64_t scheduler_thread_runtime_ticks(uint64_t id);
+void scheduler_process_accounting_tick(uint64_t pid);
 
 #endif

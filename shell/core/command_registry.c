@@ -31,6 +31,13 @@
 #include "usermode.h"
 #include "heap.h"
 #include "scheduler.h"
+#include "modules.h"
+#include "services.h"
+#include "fontinfo.h"
+#include "ps.h"
+#include "free.h"
+#include "hostname.h"
+#include "arch.h"
 
 #include "echo.h"
 #include "reverse.h"
@@ -111,6 +118,13 @@ CMD0(beep, beep)
 CMD0(reboot, reboot)
 CMD0(shutdown, shutdown)
 CMD0(halt, halt)
+CMD0(modules, modules)
+CMD0(services, services)
+CMD0(fontinfo, fontinfo)
+CMD0(ps, ps)
+CMD0(free, free)
+CMD0(hostname, hostname)
+CMD0(arch, arch)
 CMD1(diskls, diskls)
 CMD1(diskcat, diskcat)
 
@@ -287,6 +301,13 @@ static const command_entry_t g_commands[] = {
     ENTRY("hardware", 0, CMD_SYSTEM, "hardware", "detect platform hardware", command_hardware)
     ENTRY("lspci", 0, CMD_SYSTEM, "lspci", "list PCI devices", command_lspci)
     ENTRY("colors", 0, CMD_SYSTEM, "colors", "show console color test", command_colors)
+    ENTRY("modules", 0, CMD_SYSTEM, "modules", "list driver and service modules", command_modules)
+    ENTRY("services", 0, CMD_SYSTEM, "services", "list core services and their state", command_services)
+    ENTRY("fontinfo", 0, CMD_SYSTEM, "fontinfo", "show the resident system font", command_fontinfo)
+    ENTRY("ps", 0, CMD_SYSTEM, "ps", "list process state and address spaces", command_ps)
+    ENTRY("free", 0, CMD_SYSTEM, "free", "show physical memory usage", command_free)
+    ENTRY("hostname", 0, CMD_SYSTEM, "hostname", "show motherboard-derived hostname", command_hostname)
+    ENTRY("arch", 0, CMD_SYSTEM, "arch", "show kernel architecture", command_arch)
 
     /* Input / graphics */
     ENTRY("gpuinfo", 0, CMD_HARDWARE, "gpuinfo", "show detected GPU and PCI details", command_gpuinfo)

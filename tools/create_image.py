@@ -1,105 +1,9 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$ROOT_DIR"
-
-RED=$'\033[31m'; GREEN=$'\033[32m'; CYAN=$'\033[36m'; YELLOW=$'\033[33m'; BOLD=$'\033[1m'; RESET=$'\033[0m'
-if [[ ! -t 1 ]]; then RED=''; GREEN=''; CYAN=''; YELLOW=''; BOLD=''; RESET=''; fi
-
-OUT_IMG="${NEXUS_IMAGE:-NexusOS.img}"
-OUT_ISO="${NEXUS_ISO:-NexusOS.iso}"
-USERDATA_SPEC=""
-
-usage() {
-    cat <<USAGE
-Usage: $(basename "$0") [options]
-
-Options:
-  --userdata SIZE   USERDATA size: 512M, 1G, 2G, 4G, or custom (e.g. 768M)
-  --out PATH        output GPT image (default: $OUT_IMG)
-  --iso-out PATH    output bootable ISO (default: $OUT_ISO)
-  --help            show this help
-
-Without --userdata, an interactive size menu is shown on a terminal.
-USAGE
-}
-
-die() { printf '%s%sERROR:%s %s\n' "$BOLD" "$RED" "$RESET" "$*" >&2; exit 1; }
-info() { printf '%s=>%s %s\n' "$CYAN" "$RESET" "$*"; }
-ok() { printf '%s✓%s %s\n' "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s!%s %s\n' "$YELLOW" "$RESET" "$*"; }
-
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --userdata)
-            [[ $# -ge 2 ]] || die "--userdata requires a value"
-            USERDATA_SPEC="$2"
-            shift 2
-            ;;
-        --out)
-            [[ $# -ge 2 ]] || die "--out requires a path"
-            OUT_IMG="$2"
-            shift 2
-            ;;
-        --iso-out)
-            [[ $# -ge 2 ]] || die "--iso-out requires a path"
-            OUT_ISO="$2"
-            shift 2
-            ;;
-        --help|-h) usage; exit 0 ;;
-        *) die "Unknown option: $1" ;;
-    esac
-done
-
-if [[ -z "$USERDATA_SPEC" ]]; then
-    if [[ -t 0 ]]; then
-        printf '%s%sNexusOS Image Creator%s\n\n' "$BOLD" "$CYAN" "$RESET"
-        printf 'Select USERDATA size:\n'
-        printf '  1) 512M\n'
-        printf '  2) 1G\n'
-        printf '  3) 2G\n'
-        printf '  4) 4G\n'
-        printf '  5) Custom\n\n'
-        read -r -p 'Choice [2]: ' choice
-        choice="${choice:-2}"
-        case "$choice" in
-            1) USERDATA_SPEC='512M' ;;
-            2) USERDATA_SPEC='1G' ;;
-            3) USERDATA_SPEC='2G' ;;
-            4) USERDATA_SPEC='4G' ;;
-            5) read -r -p 'Custom size (e.g. 768M, 6G): ' USERDATA_SPEC ;;
-            *) die 'Invalid choice' ;;
-        esac
-    else
-        USERDATA_SPEC='1G'
-        warn "Non-interactive mode: using USERDATA=1G"
-    fi
-fi
-
-command -v python3 >/dev/null 2>&1 || die 'python3 is required to create the real GPT/FAT32 image'
-[[ -f build/BOOTX64.EFI ]] || die 'build/BOOTX64.EFI is missing; run ./build.sh first'
-[[ -f build/kernel.elf ]] || die 'build/kernel.elf is missing; run ./build.sh first'
-[[ -f iso/EFI/BOOT/BOOTX64.EFI ]] || die 'iso/EFI/BOOT/BOOTX64.EFI is missing; run make iso or ./build.sh first'
-[[ -f iso/kernel.elf ]] || die 'iso/kernel.elf is missing; run make iso or ./build.sh first'
-
-mkdir -p "$(dirname "$OUT_IMG")"
-mkdir -p "$(dirname "$OUT_ISO")"
-
-info "Creating GPT image: $OUT_IMG"
-info "BOOT=64 MiB | SYSTEM=64 MiB | USERDATA=$USERDATA_SPEC"
-
-export NEXUS_ROOT_DIR="$ROOT_DIR"
-export NEXUS_OUT_IMG="$OUT_IMG"
-export NEXUS_USERDATA_SPEC="$USERDATA_SPEC"
-
-python3 - <<'PY'
 import math, os, shutil, struct, sys, uuid, zlib, hashlib
 from pathlib import Path
 
 ROOT = Path(os.environ['NEXUS_ROOT_DIR'])
 OUT = Path(os.environ['NEXUS_OUT_IMG'])
-USERDATA_SPEC = os.environ['NEXUS_USERDATA_SPEC']
+IMAGE_SIZE_SPEC = os.environ.get('NEXUS_IMAGE_SIZE_SPEC', '')
 SECTOR = 512
 ALIGN = 2048
 GPT_ENTRIES = 128
@@ -120,18 +24,19 @@ def die(msg):
 
 def parse_size(s):
     s = s.strip().upper()
-    units = {'K': 1024, 'M': 1024**2, 'G': 1024**3, 'T': 1024**4}
+    units = {'M': 1024**2, 'G': 1024**3, 'T': 1024**4,
+             'MB': 1024**2, 'GB': 1024**3, 'TB': 1024**4}
     if s.isdigit():
         value = int(s) * 1024**2
     else:
-        unit = s[-1:] if s else ''
-        if unit not in units or not s[:-1].isdigit():
-            die(f'invalid USERDATA size: {s!r}')
-        value = int(s[:-1]) * units[unit]
-    if value < 512 * 1024 * 1024:
-        die('USERDATA must be at least 512 MiB')
+        unit = next((u for u in ('TB', 'GB', 'MB', 'T', 'G', 'M') if s.endswith(u)), None)
+        if unit is None or not s[:-len(unit)].isdigit():
+            die(f'invalid image size: {s!r}')
+        value = int(s[:-len(unit)]) * units[unit]
+    if value < 192 * 1024 * 1024:
+        die('image must be at least 192 MiB')
     if value % SECTOR:
-        die('USERDATA size must be sector aligned')
+        die('image size must be sector aligned')
     return value
 
 
@@ -489,22 +394,31 @@ def read_partition_table(fp):
     return h, parts
 
 
-userdata_bytes = parse_size(USERDATA_SPEC)
-userdata_sectors = userdata_bytes // SECTOR
 boot_sectors = 64 * 1024 * 1024 // SECTOR
 system_sectors = 64 * 1024 * 1024 // SECTOR
 
+if not IMAGE_SIZE_SPEC:
+    die('NEXUS_IMAGE_SIZE_SPEC is required; --size controls the total image size')
+
+total_image_bytes = parse_size(IMAGE_SIZE_SPEC)
 boot_start = ALIGN
 system_start = align_up(boot_start + boot_sectors, ALIGN)
 userdata_start = align_up(system_start + system_sectors, ALIGN)
+requested_total_sectors = total_image_bytes // SECTOR
+
+# The requested size is the size of the complete GPT disk image. BOOT and
+# SYSTEM stay fixed at 64 MiB each; every remaining byte is USERDATA, minus
+# the GPT backup metadata at the end of the disk.
+total_sectors = requested_total_sectors
+userdata_sectors = total_sectors - userdata_start - GPT_ENTRIES_SECTORS - 1
+if userdata_sectors <= 0:
+    die('image is too small for BOOT + SYSTEM + USERDATA + GPT metadata')
+userdata_bytes = userdata_sectors * SECTOR
 userdata_end = userdata_start + userdata_sectors - 1
-last_usable = align_up(userdata_end + 1, ALIGN) - 1
-# Leave 1 MiB after the last partition for the backup GPT structures.
-total_sectors = align_up(userdata_end + GPT_ENTRIES_SECTORS + 34, ALIGN)
+
 last_usable = total_sectors - GPT_ENTRIES_SECTORS - 2
 if userdata_end > last_usable:
-    total_sectors = align_up(userdata_end + GPT_ENTRIES_SECTORS + 34, ALIGN)
-    last_usable = total_sectors - GPT_ENTRIES_SECTORS - 2
+    die('USERDATA partition overlaps the backup GPT area')
 
 parts = [
     ('BOOT', ESP_GUID, boot_start, boot_start + boot_sectors - 1),
@@ -655,24 +569,3 @@ if sha256(ROOT/'build/kernel.elf') != sha256(ROOT/'iso/kernel.elf'):
     die('kernel.elf differs between build/ and iso/')
 
 print('validated: GPT + 3 partitions + FAT32 VBRs + required NexusOS files')
-PY
-
-ok "Image verified: $OUT_IMG"
-printf '%s\n' "  BOOT     64 MiB  FAT32  EFI System Partition" "  SYSTEM   64 MiB  FAT32" "  USERDATA $USERDATA_SPEC FAT32" "  Kernel   BOOT/kernel.elf (existing UEFI bootloader compatibility)" "  System   SYSTEM/KERNEL/KERNEL.ELF (real kernel mirror)"
-
-
-# Also produce the standalone bootable ISO from the same build artifacts.
-# This is intentionally done after the GPT image is verified so `create-img.sh`
-# becomes a one-command release media creator for both VMware and disk-image use.
-command -v python3 >/dev/null 2>&1 || die 'python3 is required to create the bootable ISO'
-[[ -f tools/create_iso.py ]] || die 'tools/create_iso.py is missing'
-
-info "Creating bootable ISO: $OUT_ISO"
-python3 tools/create_iso.py \
-    --bootloader build/BOOTX64.EFI \
-    --kernel build/kernel.elf \
-    --out "$OUT_ISO"
-
-[[ -s "$OUT_ISO" ]] || die "bootable ISO was not created: $OUT_ISO"
-ok "ISO verified: $OUT_ISO"
-printf '%s\n' "  EFI      EFI/BOOT/BOOTX64.EFI" "  Kernel   kernel.elf" "  Format   ISO9660 + El Torito EFI"

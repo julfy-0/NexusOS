@@ -12,19 +12,28 @@
 #define PROCESS_FLAG_SCHEDULER_OWNED 0x00000004U
 #define PROCESS_USER_MAX_PAGES 16
 #define PROCESS_USER_STACK_TOP 0x0000000080000000ULL
-#define PROCESS_MAX_FDS 8
+#define PROCESS_MAX_FDS 16
+#define PROCESS_NAME_LEN 32
+#define PROCESS_CWD_LEN 128
+#define PROCESS_ENV_COUNT 8
+#define PROCESS_ENV_KEY_LEN 24
+#define PROCESS_ENV_VALUE_LEN 64
 
 typedef enum {
     PROCESS_FD_UNUSED = 0,
     PROCESS_FD_STDIN_CONSOLE,
     PROCESS_FD_STDOUT_CONSOLE,
-    PROCESS_FD_STDERR_CONSOLE
+    PROCESS_FD_STDERR_CONSOLE,
+    PROCESS_FD_VFS_FILE,
+    PROCESS_FD_VFS_DIR
 } process_fd_type_t;
 
 typedef struct {
     process_fd_type_t type;
     uint32_t flags;
     uint64_t object;
+    uint64_t offset;
+    char path[128];
 } process_fd_t;
 
 typedef enum {
@@ -36,6 +45,16 @@ typedef enum {
 
 typedef struct nexus_process {
     uint64_t pid, parent_pid, address_space_cr3;
+    uint64_t start_tick;
+    uint64_t cpu_ticks;
+    uint64_t heap_base;
+    uint64_t heap_end;
+    uint64_t memory_limit_bytes;
+    uint32_t priority;
+    uint32_t env_count;
+    char name[PROCESS_NAME_LEN];
+    char cwd[PROCESS_CWD_LEN];
+    struct { char key[PROCESS_ENV_KEY_LEN]; char value[PROCESS_ENV_VALUE_LEN]; } env[PROCESS_ENV_COUNT];
     uint64_t user_entry, user_stack_base, user_stack_size, user_pages_reserved;
     uint64_t user_page_base, user_page_count, user_page_phys[PROCESS_USER_MAX_PAGES];
     uint64_t user_page_va[PROCESS_USER_MAX_PAGES];
@@ -65,6 +84,25 @@ int process_user_zero(uint64_t pid, uint64_t virtual_address, uint64_t size);
 int process_fd_is_valid(uint64_t pid, uint64_t fd);
 int process_fd_is_writable(uint64_t pid, uint64_t fd);
 int process_fd_close(uint64_t pid, uint64_t fd);
+int process_fd_open(uint64_t pid, const char *path, uint32_t flags);
+int process_fd_read(uint64_t pid, uint64_t fd, void *buffer, uint64_t size);
+int process_fd_write(uint64_t pid, uint64_t fd, const void *buffer, uint64_t size);
+int process_fd_seek(uint64_t pid, uint64_t fd, int64_t offset, uint32_t whence, uint64_t *out_offset);
+int process_fd_tell(uint64_t pid, uint64_t fd, uint64_t *out_offset);
+int process_set_name(uint64_t pid, const char *name);
+int process_get_name(uint64_t pid, char *out, uint64_t size);
+int process_set_priority(uint64_t pid, uint32_t priority);
+uint32_t process_get_priority(uint64_t pid);
+int process_set_env(uint64_t pid, const char *key, const char *value);
+int process_unset_env(uint64_t pid, const char *key);
+int process_get_env(uint64_t pid, const char *key, char *out, uint64_t size);
+int process_get_cwd(uint64_t pid, char *out, uint64_t size);
+int process_set_cwd(uint64_t pid, const char *cwd);
+void process_account_cpu_tick(uint64_t pid);
+uint64_t process_cpu_ticks(uint64_t pid);
+uint64_t process_start_tick(uint64_t pid);
 int process_user_range_valid(uint64_t pid, uint64_t virtual_address, uint64_t size, uint64_t required_flags);
 int process_map_user_memory(uint64_t pid,uint64_t base,uint64_t pages); int process_unmap_user_memory(uint64_t pid);
+int process_unmap_user_range(uint64_t pid, uint64_t base, uint64_t size);
+uint64_t process_alloc_user_range(uint64_t pid, uint64_t pages, uint64_t flags);
 #endif

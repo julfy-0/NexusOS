@@ -1,31 +1,32 @@
 # NexusOS build.sh
 
-`build.sh` is the pretty command-line build frontend for NexusOS 0.5.11
+`build.sh` is now the only project shell entrypoint.
 
-Run from the project root:
+It can compile NexusOS, optionally create the GPT/FAT32 `NexusOS.img`, optionally create `NexusOS.iso`, and optionally launch QEMU.
+
+Interactive mode:
 
 ```sh
 ./build.sh
 ```
 
-For an incremental build without removing `build/` and `iso/` first:
-
-```sh
-./build.sh --no-clean
-```
-
-The four progress lines represent build artifact groups:
+The script asks:
 
 ```text
-Kernel       [################........]  66%
-Drivers      [########################] 100%
-Bootloader   [########################] 100%
-OS           [########################] 100%
+Want to create NexusOS.img? [Y]:
+Image size [1G] (MB/GB/TB, e.g. 2048M, 4G, 1T):
+Want to create NexusOS.iso? [Y]:
+Want to launch NexusOS? [N]:
 ```
 
-The bars are derived from real object/final-output files under `build/` and `iso/`. `OS` is the overall completion ratio across the complete build artifact set, including the final bootable ISO. The script is a frontend over the existing Makefile, not a separate build system.
+Supported image size suffixes are `M`, `G`, and `T` (also accepted in lowercase). A bare number is interpreted as MiB.
 
+Non-interactive examples:
 
-### Parallel build
+```sh
+./build.sh --size 4G --run
+./build.sh --no-img --run
+./build.sh --image-only --size 8G
+```
 
-`build.sh` runs GNU Make with multiple jobs (`NEXUS_BUILD_JOBS` can override the worker count). The four progress bars update together while compilation is happening. `OS` is the overall percentage of the complete build artifact set, not a separate fake stage.
+The previous standalone shell entrypoints were removed so build, image creation, ISO creation and QEMU launching share one implementation.

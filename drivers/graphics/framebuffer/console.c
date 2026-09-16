@@ -513,18 +513,11 @@ void console_component_status(const char *name, const char *type, const char *ve
     console_putchar(' ');
     console_print(safe_version);
     console_putchar(' ');
-    console_putchar('[');
-    console_putchar(' ');
+    console_print("[ ");
     console_set_color(ok ? COLOR_GREEN : COLOR_RED, saved_bg);
-    console_print(ok ? "OK  " : "FAILED");
+    console_print(ok ? " OK  " : " FAIL ");
     console_set_color(COLOR_WHITE, saved_bg);
-    if (ok) {
-        console_putchar(' ');
-        console_putchar(']');
-    } else {
-        console_putchar(' ');
-        console_putchar(']');
-    }
+    console_print("]");
     console_putchar('\n');
     console_set_color(saved_fg, saved_bg);
 }

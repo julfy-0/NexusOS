@@ -790,7 +790,7 @@ ISO содержит:
 - ISO9660 копии `EFI/BOOT/BOOTX64.EFI` и `KERNEL.ELF`
 
 Таким образом ISO можно напрямую подключить к VMware как CD/DVD image.
-`make run` в текущем Makefile передаёт этот ISO в `run.sh --iso`.
+`make run` в текущем Makefile передаёт этот ISO в `build.sh --no-prompt --no-img --no-iso`.
 
 ==================================================
 28. RUNTIME TEST

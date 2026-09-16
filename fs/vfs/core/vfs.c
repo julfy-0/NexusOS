@@ -524,3 +524,241 @@ void vfs_gui_getcwd(char *out, int out_size) {
     while (g_cwd_path[i] && i < out_size - 1) { out[i] = g_cwd_path[i]; i++; }
     out[i] = '\0';
 }
+
+/* 0.6.0 path-oriented VFS backend. The RAM tree remains the primary
+ * namespace; mounted FAT32 paths are forwarded to the persistent backend. */
+static int normalize_absolute(const char *path, char *out) {
+    char combined[256];
+    char components[32][VFS_NAME_LEN];
+    int depth = 0;
+    const char *p;
+
+    if (!path || !out) return 0;
+    if (path[0] == '/') {
+        copy_truncate(combined, path, sizeof(combined));
+    } else {
+        path_join(combined, g_cwd_path, path);
+    }
+
+    p = combined;
+    while (*p) {
+        char comp[VFS_NAME_LEN];
+        int n = 0;
+        while (*p == '/') p++;
+        while (*p && *p != '/') {
+            if (n < VFS_NAME_LEN - 1) comp[n++] = *p;
+            p++;
+        }
+        comp[n] = '\0';
+        if (n == 0 || (n == 1 && comp[0] == '.')) continue;
+        if (n == 2 && comp[0] == '.' && comp[1] == '.') {
+            if (depth > 0) depth--;
+            continue;
+        }
+        if (depth >= 32) return 0;
+        copy_truncate(components[depth++], comp, VFS_NAME_LEN);
+    }
+
+    out[0] = '/';
+    out[1] = '\0';
+    int pos = 1;
+    for (int i = 0; i < depth; ++i) {
+        if (pos > 1 && pos < 255) out[pos++] = '/';
+        for (int j = 0; components[i][j] && pos < 255; ++j) out[pos++] = components[i][j];
+    }
+    out[pos] = '\0';
+    return 1;
+}
+
+static int resolve_ram_path(const char *abs, int *out_idx) {
+    if (!abs || abs[0] != '/') return 0;
+    if (strcmp(abs, "/") == 0) {
+        if (out_idx) *out_idx = 0;
+        return 1;
+    }
+
+    int parent = 0;
+    const char *p = abs + 1;
+    while (*p) {
+        char comp[VFS_NAME_LEN];
+        int n = 0;
+        while (*p && *p != '/') {
+            if (n < VFS_NAME_LEN - 1) comp[n++] = *p;
+            p++;
+        }
+        comp[n] = '\0';
+        while (*p == '/') p++;
+        int idx = find_child(parent, comp);
+        if (idx < 0) return 0;
+        parent = idx;
+    }
+    if (out_idx) *out_idx = parent;
+    return 1;
+}
+
+int vfs_read_path(const char *path, uint8_t *buffer, uint64_t capacity,
+                  uint64_t offset, uint64_t *out_read) {
+    char abs[256], mountpoint[256], rel[256];
+    if (out_read) *out_read = 0;
+    if (!buffer || capacity == 0 || !normalize_absolute(path, abs)) return -1;
+
+    if (path_is_mount(abs, mountpoint) && fat32_is_mounted() && fat_relative(abs, mountpoint, rel)) {
+        static uint8_t temp[64 * 1024];
+        unsigned int size = 0;
+        if (!fat32_read_file(rel, temp, sizeof(temp), &size)) return -1;
+        if (offset >= size) return 0;
+        uint64_t n = capacity;
+        if (n > size - offset) n = size - offset;
+        for (uint64_t i = 0; i < n; ++i) buffer[i] = temp[offset + i];
+        if (out_read) *out_read = n;
+        return 0;
+    }
+
+    int idx = -1;
+    if (!resolve_ram_path(abs, &idx) || g_nodes[idx].type != VFS_NODE_FILE) return -1;
+    uint64_t size = (uint64_t)g_nodes[idx].content_len;
+    if (offset >= size) return 0;
+    uint64_t n = capacity;
+    if (n > size - offset) n = size - offset;
+    for (uint64_t i = 0; i < n; ++i) buffer[i] = (uint8_t)g_nodes[idx].content[offset + i];
+    if (out_read) *out_read = n;
+    return 0;
+}
+
+int vfs_file_size_path(const char *path, uint64_t *out_size) {
+    char abs[256], mountpoint[256], rel[256];
+    if (out_size) *out_size = 0;
+    if (!normalize_absolute(path, abs)) return -1;
+
+    if (path_is_mount(abs, mountpoint) && fat32_is_mounted() && fat_relative(abs, mountpoint, rel)) {
+        static uint8_t temp[64 * 1024];
+        unsigned int size = 0;
+        if (!fat32_read_file(rel, temp, sizeof(temp), &size)) return -1;
+        if (out_size) *out_size = size;
+        return 0;
+    }
+
+    int idx = -1;
+    if (!resolve_ram_path(abs, &idx) || g_nodes[idx].type != VFS_NODE_FILE) return -1;
+    if (out_size) *out_size = (uint64_t)g_nodes[idx].content_len;
+    return 0;
+}
+
+int vfs_is_dir_path(const char *path) {
+    char abs[256];
+    if (!normalize_absolute(path, abs)) return 0;
+    if (strcmp(abs, "/") == 0) return 1;
+    char mountpoint[256], rel[256];
+    if (path_is_mount(abs, mountpoint) && fat32_is_mounted() && fat_relative(abs, mountpoint, rel)) {
+        return fat32_is_directory(rel);
+    }
+    int idx = -1;
+    return resolve_ram_path(abs, &idx) && g_nodes[idx].type == VFS_NODE_DIR;
+}
+
+int vfs_mkdir_path(const char *path) {
+    char abs[256];
+    if (!normalize_absolute(path, abs) || strcmp(abs, "/") == 0) return -1;
+
+    char parent[256];
+    copy_truncate(parent, abs, sizeof(parent));
+    char *slash = 0;
+    for (char *p = parent + 1; *p; ++p) if (*p == '/') slash = p;
+    if (!slash) {
+        return vfs_mkdir(abs + 1);
+    }
+    *slash = '\0';
+    const char *name = slash + 1;
+    int parent_idx = -1;
+    if (!resolve_ram_path(parent, &parent_idx) || g_nodes[parent_idx].type != VFS_NODE_DIR) return -1;
+    if (find_child(parent_idx, name) >= 0) return -1;
+    int idx = find_free_node();
+    if (idx < 0) return -1;
+    g_nodes[idx].type = VFS_NODE_DIR;
+    g_nodes[idx].parent = parent_idx;
+    copy_truncate(g_nodes[idx].name, name, VFS_NAME_LEN);
+    return 0;
+}
+
+int vfs_unlink_path(const char *path) {
+    char abs[256];
+    if (!normalize_absolute(path, abs)) return -1;
+    int idx = -1;
+    if (!resolve_ram_path(abs, &idx) || idx <= 2 || g_nodes[idx].type == VFS_NODE_FREE) return -1;
+    if (g_nodes[idx].type == VFS_NODE_DIR && has_children(idx)) return -1;
+    g_nodes[idx].type = VFS_NODE_FREE;
+    return 0;
+}
+
+int vfs_write_path(const char *path, const uint8_t *buffer, uint64_t size,
+                   uint64_t offset, uint64_t *out_written) {
+    char abs[256], mountpoint[256], rel[256];
+    if (out_written) *out_written = 0;
+    if (!buffer || !normalize_absolute(path, abs)) return -1;
+
+    if (path_is_mount(abs, mountpoint) && fat32_is_mounted() && fat_relative(abs, mountpoint, rel)) {
+        static uint8_t temp[64 * 1024];
+        unsigned int old = 0;
+        (void)fat32_read_file(rel, temp, sizeof(temp), &old);
+        if (offset > sizeof(temp) || size > sizeof(temp) - offset) return -1;
+        uint64_t end = offset + size;
+        if (end > old) old = (unsigned int)end;
+        for (uint64_t i = 0; i < size; ++i) temp[offset + i] = buffer[i];
+        if (!fat32_write_file(rel, temp, old)) return -1;
+        if (out_written) *out_written = size;
+        return 0;
+    }
+
+    int idx = -1;
+    if (!resolve_ram_path(abs, &idx)) {
+        char parent[256];
+        copy_truncate(parent, abs, sizeof(parent));
+        char *slash = 0;
+        for (char *p = parent + 1; *p; ++p) if (*p == '/') slash = p;
+        if (!slash) return -1;
+        *slash = '\0';
+        const char *name = slash + 1;
+        int parent_idx = -1;
+        if (!resolve_ram_path(parent, &parent_idx) || g_nodes[parent_idx].type != VFS_NODE_DIR) return -1;
+        idx = find_child(parent_idx, name);
+        if (idx < 0) {
+            idx = find_free_node();
+            if (idx < 0) return -1;
+            g_nodes[idx].type = VFS_NODE_FILE;
+            g_nodes[idx].parent = parent_idx;
+            copy_truncate(g_nodes[idx].name, name, VFS_NAME_LEN);
+            g_nodes[idx].content_len = 0;
+            g_nodes[idx].content[0] = '\0';
+        }
+    }
+
+    if (g_nodes[idx].type != VFS_NODE_FILE || offset >= VFS_CONTENT_LEN) return -1;
+    if (size > (uint64_t)VFS_CONTENT_LEN - offset) size = (uint64_t)VFS_CONTENT_LEN - offset;
+    for (uint64_t i = 0; i < size; ++i) g_nodes[idx].content[offset + i] = (char)buffer[i];
+    uint64_t end = offset + size;
+    if (end > (uint64_t)g_nodes[idx].content_len) g_nodes[idx].content_len = (int)end;
+    g_nodes[idx].content[g_nodes[idx].content_len] = '\0';
+    if (out_written) *out_written = size;
+    return 0;
+}
+
+int vfs_rename_path(const char *src, const char *dst) {
+    char a[256], b[256];
+    if (!normalize_absolute(src, a) || !normalize_absolute(dst, b)) return -1;
+    int idx = -1;
+    if (!resolve_ram_path(a, &idx) || idx <= 2) return -1;
+
+    char parent[256];
+    copy_truncate(parent, b, sizeof(parent));
+    char *slash = 0;
+    for (char *p = parent + 1; *p; ++p) if (*p == '/') slash = p;
+    if (!slash) return -1;
+    *slash = '\0';
+    const char *name = slash + 1;
+    int parent_idx = -1;
+    if (!resolve_ram_path(parent, &parent_idx) || g_nodes[parent_idx].type != VFS_NODE_DIR) return -1;
+    if (find_child(parent_idx, name) >= 0) return -1;
+    g_nodes[idx].parent = parent_idx;
+    copy_truncate(g_nodes[idx].name, name, VFS_NAME_LEN);
+    return 0;
+}
