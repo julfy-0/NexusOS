@@ -1,4 +1,4 @@
-# NexusOS 0.5.18 — Enstein
+# NexusOS 0.5.37 — Enstein
 #
 # This Makefile is the single source of truth for compilation and linking.
 # build.sh is only a progress/UX frontend around the real targets below.
@@ -12,7 +12,7 @@ OBJCOPY ?= objcopy
 
 BUILD  := build
 ISODIR := iso
-NEXUS_VERSION ?= 0.5.29
+NEXUS_VERSION ?= 0.5.37
 ISO_IMAGE := $(BUILD)/NexusOS-$(NEXUS_VERSION).iso
 
 # -----------------------------------------------------------------------------

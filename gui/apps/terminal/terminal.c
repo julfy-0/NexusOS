@@ -2,6 +2,7 @@
 #include "gui_state.h"
 #include "renderer.h"
 #include "nexus_version.h"
+#include "target.h"
 
 static int streq(const char *a, const char *b) {
     int i = 0; while (a[i] && b[i] && a[i] == b[i]) i++;
@@ -30,7 +31,7 @@ void gui_terminal_draw(void) {
     gui_renderer_text("NexusOS " NEXUS_VERSION_STRING " Terminal",x+16,y+52,1,0xCFC8DC);
     gui_renderer_text(ctx->term_output,x+16,y+78,1,0xEEEAF4);
     gui_renderer_text("Commands: help  clear  version  uptime  desktop",x+16,y+h-64,1,0xAFA8BC);
-    gui_renderer_text("NexusOS> ",x+16,y+h-36,1,0xFFFFFF);
+    gui_renderer_text("root@",x+16,y+h-36,1,0xFFFFFF);
     gui_renderer_text(ctx->term_line,x+16+9*8,y+h-36,1,0xFFFFFF);
     gui_renderer_text("_",x+16+(9+ctx->term_len)*8,y+h-36,1,0xBFAEFF);
 }

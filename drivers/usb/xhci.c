@@ -17,6 +17,7 @@
 #define XHCI_USBCMD_HCRST (1u << 1)
 #define XHCI_USBCMD_INTE  (1u << 2)
 #define XHCI_USBSTS_HCH   (1u << 0)
+#define XHCI_USBSTS_CNR   (1u << 11)
 
 #define XHCI_PORTSC_CCS  (1u << 0)
 #define XHCI_PORTSC_PED  (1u << 1)
@@ -332,9 +333,9 @@ static int control_transfer(uint8_t bmRequestType, uint8_t bRequest,
 /* ---------------------------------------------------------------------
  * xHCI Legacy Support handoff (Extended Capabilities, capability id 1).
  * ------------------------------------------------------------------- */
-static void xhci_legacy_handoff(uint32_t hccparams1) {
+static int xhci_legacy_handoff(uint32_t hccparams1) {
     uint32_t xecp = (hccparams1 >> 16) & 0xFFFFu;
-    if (xecp == 0) return;
+    if (xecp == 0) return 1;
 
     uint32_t off = xecp * 4u;
     for (int guard = 0; guard < 256 && off != 0; guard++) {
@@ -343,17 +344,25 @@ static void xhci_legacy_handoff(uint32_t hccparams1) {
         uint32_t next = (cap >> 8) & 0xFFu;
 
         if (cap_id == 1) { /* USB Legacy Support */
-            mmio_write32(off, cap | (1u << 24)); /* OS Owned Semaphore */
-            for (uint32_t i = 0; i < SPIN_LIMIT; i++) {
-                uint32_t v = mmio_read32(off);
-                if ((v & (1u << 24)) && !(v & (1u << 16))) break;
+            uint32_t v = mmio_read32(off);
+            const uint32_t BIOS_OWNED = (1u << 16);
+            const uint32_t OS_OWNED   = (1u << 24);
+
+            /* Claim the controller only after the BIOS-owned semaphore is
+             * observed. Some firmware leaves SMI generation enabled; clear
+             * it before handing the controller to the OS. */
+            mmio_write32(off, (v & ~0xFFFFu) | OS_OWNED);
+            for (uint32_t i = 0; i < 2000000u; i++) {
+                v = mmio_read32(off);
+                if (!(v & BIOS_OWNED)) return (v & OS_OWNED) ? 1 : 0;
             }
-            return;
+            return 0;
         }
 
         if (next == 0) break;
         off += next * 4u;
     }
+    return 1;
 }
 
 /* ---------------------------------------------------------------------
@@ -410,7 +419,16 @@ static const char hid_ascii_shift[104] = {
 #define HID_ARROW_DOWN  0x51
 #define HID_ARROW_UP    0x52
 
-static void dispatch_hid_key(uint8_t usage, int shift) {
+static void dispatch_hid_key(uint8_t usage, int shift, int ctrl) {
+    if (!gui_is_active() && ctrl && usage == HID_ARROW_UP) {
+        console_scroll(1);
+        return;
+    }
+    if (!gui_is_active() && ctrl && usage == HID_ARROW_DOWN) {
+        console_scroll(-1);
+        return;
+    }
+
     if (usage == HID_PAGE_UP) { console_scroll(1); return; }
     if (usage == HID_PAGE_DOWN) { console_scroll(-1); return; }
 
@@ -422,6 +440,10 @@ static void dispatch_hid_key(uint8_t usage, int shift) {
                       (usage == HID_ARROW_LEFT) ? GUI_KEY_LEFT : GUI_KEY_RIGHT;
             (void)gui_handle_key(key);
         } else {
+            if (ctrl) {
+                /* Ctrl+Arrow was consumed above for scrollback. */
+                return;
+            }
             if (usage == HID_ARROW_UP) shell_history_prev();
             else if (usage == HID_ARROW_DOWN) shell_history_next();
         }
@@ -444,6 +466,7 @@ static void dispatch_hid_key(uint8_t usage, int shift) {
 static void process_boot_report(const uint8_t *report) {
     uint8_t modifiers = report[0];
     int shift = (modifiers & 0x22) != 0; /* bit1 LShift, bit5 RShift */
+    int ctrl = (modifiers & 0x11) != 0;  /* bit0 LCtrl, bit4 RCtrl */
 
     for (int i = 2; i < 8; i++) {
         uint8_t usage = report[i];
@@ -451,7 +474,7 @@ static void process_boot_report(const uint8_t *report) {
 
         int was_down = 0;
         for (int j = 2; j < 8; j++) if (g_last_report[j] == usage) { was_down = 1; break; }
-        if (!was_down) dispatch_hid_key(usage, shift);
+        if (!was_down) dispatch_hid_key(usage, shift, ctrl);
     }
 
     for (int i = 0; i < 8; i++) g_last_report[i] = report[i];
@@ -728,10 +751,15 @@ static int xhci_try_controller(const nexus_pci_device_t *dev) {
     g_rt_base = rtsoff;
     g_ctx_size = (hccparams1 & (1u << 2)) ? 64u : 32u;
 
-    xhci_legacy_handoff(hccparams1);
+    if (!xhci_legacy_handoff(hccparams1)) { g_last_error = "xHCI BIOS ownership handoff timed out"; return 0; }
 
     /* Остановить контроллер перед reset. */
     uint32_t cmd = mmio_read32(g_op_base + 0x00);
+    uint32_t sts = mmio_read32(g_op_base + 0x04);
+    if (sts & XHCI_USBSTS_CNR) {
+        g_last_error = "xHCI controller not ready";
+        return 0;
+    }
     cmd &= ~XHCI_USBCMD_RS;
     mmio_write32(g_op_base + 0x00, cmd);
     if (!wait_bit32(g_op_base + 0x04, XHCI_USBSTS_HCH, 1)) { g_last_error = "xHCI did not halt before reset"; return 0; }
@@ -740,6 +768,7 @@ static int xhci_try_controller(const nexus_pci_device_t *dev) {
     cmd = mmio_read32(g_op_base + 0x00);
     mmio_write32(g_op_base + 0x00, cmd | XHCI_USBCMD_HCRST);
     if (!wait_bit32(g_op_base + 0x00, XHCI_USBCMD_HCRST, 0)) { g_last_error = "xHCI controller reset timed out"; return 0; }
+    if (!wait_bit32(g_op_base + 0x04, XHCI_USBSTS_CNR, 0)) { g_last_error = "xHCI controller not ready after reset"; return 0; }
     if (!wait_bit32(g_op_base + 0x04, XHCI_USBSTS_HCH, 1)) { g_last_error = "xHCI did not return to halted state after reset"; return 0; }
 
     g_page_size = (mmio_read32(g_op_base + 0x08) & 0xFFFFu) << 12;
@@ -776,7 +805,10 @@ static int xhci_try_controller(const nexus_pci_device_t *dev) {
     cmd = mmio_read32(g_op_base + 0x00);
     cmd |= XHCI_USBCMD_RS;
     mmio_write32(g_op_base + 0x00, cmd);
-    wait_bit32(g_op_base + 0x04, XHCI_USBSTS_HCH, 0);
+    if (!wait_bit32(g_op_base + 0x04, XHCI_USBSTS_HCH, 0)) {
+        g_last_error = "xHCI failed to start";
+        return 0;
+    }
 
     uint32_t port_base = g_op_base + 0x400;
     int first_connected = -1;
@@ -862,7 +894,7 @@ int xhci_mouse_present(void) { return g_mouse_present; }
 void xhci_poll(void) {
     if (!g_ready || (!g_kbd_present && !g_mouse_present)) return;
 
-    for (;;) {
+    for (uint32_t budget = 0; budget < 32; budget++) {
         xhci_trb_t *ev = &g_evt_ring[g_evt_deq];
         uint32_t ctrl = ev->control;
         if (!!(ctrl & TRB_CYCLE) != !!g_evt_cycle) break; /* новых событий нет */

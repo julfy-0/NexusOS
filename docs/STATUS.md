@@ -1,4 +1,8 @@
-# NexusOS 0.5.29 — Enstein
+# NexusOS 0.5.37 — Enstein
+
+## Kernel Driver Modules Foundation
+
+Driver initialization now goes through the kernel module manager. Hardware drivers are registered as built-in modules with metadata, priorities, runtime state and common load handling. Dynamic external module files remain future work.
 
 ## App Manager Foundation
 

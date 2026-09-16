@@ -4,7 +4,7 @@ NexusOS is a freestanding x86_64 operating-system project built around a UEFI bo
 
 ## Current release
 
-**NexusOS 0.5.29 — Enstein**
+**NexusOS 0.5.37 — Enstein**
 
 The current milestone is the **Writable FAT32 Foundation**. NexusOS now has a bounded real-disk write path beneath the existing App Manager/Application Discovery stack.
 
@@ -18,7 +18,7 @@ make -j2 iso
 make check
 ```
 
-The bootable ISO is produced at `build/NexusOS-0.5.29.iso`.
+The bootable ISO is produced at `build/NexusOS-0.5.37.iso`.
 
 For a standalone ISO from an already-built tree:
 

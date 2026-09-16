@@ -20,6 +20,12 @@ SECTIONS
         *(.rodata .rodata.*)
     }
 
+    .nexus_modules : ALIGN(8) {
+        __nexus_modules_start = .;
+        KEEP(*(.nexus_modules))
+        __nexus_modules_end = .;
+    }
+
     .data : ALIGN(4096) {
         *(.data .data.*)
     }

@@ -1,3 +1,4 @@
+#include "target.h"
 /* NexusOS graphical desktop — version comes from nexus_version.h. */
 #include <stdint.h>
 #include "gui.h"
@@ -307,7 +308,7 @@ static void draw_terminal(void) {
     text_at("NexusOS " NEXUS_VERSION_STRING " Terminal",x+16,y+52,1,0xCFC8DC);
     text_at(g_term_output,x+16,y+78,1,0xEEEAF4);
     text_at("Commands: help  clear  version  uptime  desktop",x+16,y+h-64,1,0xAFA8BC);
-    text_at("NexusOS> ",x+16,y+h-36,1,0xFFFFFF);
+    text_at("root@",x+16,y+h-36,1,0xFFFFFF);
     text_at(g_term_line,x+16+9*8,y+h-36,1,0xFFFFFF);
     text_at("_",x+16+(9+g_term_len)*8,y+h-36,1,0xBFAEFF);
 }

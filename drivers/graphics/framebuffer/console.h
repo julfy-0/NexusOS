@@ -11,6 +11,16 @@ void console_putchar(char c);
 void console_print(const char *s);
 void console_print_hex(uint64_t value);
 void console_print_dec(uint64_t value);
+void console_component_status(const char *name, const char *type, const char *version, int ok);
+
+/* Interactive terminal cursor. Enabled by the shell only; kernel/boot logs
+ * remain cursor-free. Cursor blinking is driven from the normal kernel loop
+ * using the PIT tick counter, never from an IRQ handler. */
+void console_cursor_enable(void);
+void console_cursor_disable(void);
+void console_cursor_show(void);
+void console_cursor_hide(void);
+void console_cursor_tick(void);
 
 /* Temporary output capture used by the shell I/O layer. While active,
  * console_putchar()/console_print() append text to the supplied buffer

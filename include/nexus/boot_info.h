@@ -75,6 +75,7 @@ typedef struct {
     uint64_t acpi_rsdp;
     char system_manufacturer[64];
     char system_product[96];
+    char baseboard_manufacturer[64];
 } nexus_boot_info_t;
 
 #define NEXUS_KERNEL_LINK_BASE 0x200000ULL

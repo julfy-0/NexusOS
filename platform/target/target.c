@@ -27,6 +27,13 @@ const char *target_system_product(void) {
     return "Unknown system";
 }
 
+const char *target_baseboard_manufacturer(void) {
+    nexus_boot_info_t *bi = kstate_get_boot_info();
+    if (bi && bi->baseboard_manufacturer[0]) return bi->baseboard_manufacturer;
+    if (bi && bi->system_info_valid && bi->system_manufacturer[0]) return bi->system_manufacturer;
+    return "Unknown";
+}
+
 void target_get_status(nexus_target_status_t *status) {
     if (!status) return;
     status->intel_cpu = status->amd_cpu = 0;

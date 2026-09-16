@@ -131,8 +131,13 @@ void keyboard_init(void) {
 static void dispatch_special(uint8_t sc, int released) {
     if (released) return;
     if (!gui_is_active()) {
-        if (sc == 0x49) console_scroll(1);       /* PgUp */
-        else if (sc == 0x51) console_scroll(-1);/* PgDn */
+        /* Ctrl+Arrow navigates terminal scrollback without changing shell history.
+         * One step is one text row; PageUp/PageDown remain available for faster
+         * coarse navigation. */
+        if (g_ctrl && sc == 0x48) console_scroll(1);
+        else if (g_ctrl && sc == 0x50) console_scroll(-1);
+        else if (sc == 0x49) console_scroll(1);       /* PgUp */
+        else if (sc == 0x51) console_scroll(-1);      /* PgDn */
         else if (sc == 0x48) shell_history_prev();
         else if (sc == 0x50) shell_history_next();
         return;

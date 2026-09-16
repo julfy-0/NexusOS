@@ -27,5 +27,6 @@ int target_profile_matches(void);
 void target_print_profile(void);
 const char *target_system_manufacturer(void);
 const char *target_system_product(void);
+const char *target_baseboard_manufacturer(void);
 
 #endif

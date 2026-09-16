@@ -8,6 +8,7 @@
 #include "mount.h"
 #include "command_registry.h"
 #include "parser.h"
+#include "target.h"
 
 extern int strcmp(const char *a, const char *b);
 
@@ -30,8 +31,14 @@ static int g_history_pos = -1;
 static char g_draft_buf[SHELL_BUF_SIZE];
 
 static void print_prompt(void) {
+    const char *user = "root";
+    const char *host = target_baseboard_manufacturer();
+    console_set_color(COLOR_CYAN, COLOR_BLACK);
+    console_print(user);
+    console_print("@");
+    console_print(host);
     console_set_color(COLOR_WHITE, COLOR_BLACK);
-    console_print("NexusOS> ");
+    console_print("> ");
 }
 
 static void history_add(const char *cmd) {
@@ -79,6 +86,7 @@ static const char *history_get(int idx_from_recent) {
 /* Стирает то, что сейчас на экране в строке ввода (g_len символов, через
  * backspace — так же, как обычный ввод), и печатает вместо этого new_cmd. */
 static void redraw_line(const char *new_cmd) {
+    console_cursor_hide();
     while (g_len > 0) {
         g_len--;
         console_putchar('\b');
@@ -91,6 +99,7 @@ static void redraw_line(const char *new_cmd) {
     }
     g_buf[i] = '\0';
     g_len = i;
+    console_cursor_show();
 }
 
 void shell_history_prev(void) {
@@ -240,6 +249,7 @@ void shell_init(void) {
     console_print("NexusOS Command Line — " NEXUS_VERSION_DISPLAY "\n");
     console_print("Type 'help' for available commands.\n\n");
     print_prompt();
+    console_cursor_enable();
 }
 
 void shell_return_from_desktop(void) {
@@ -250,9 +260,11 @@ void shell_return_from_desktop(void) {
     console_print("NexusOS Command Line — " NEXUS_VERSION_DISPLAY "\n");
     console_print("Returned from NexusOS Desktop.\n\n");
     print_prompt();
+    console_cursor_enable();
 }
 
 void shell_input_char(char c) {
+    console_cursor_hide();
     if (c == '\n') {
         console_putchar('\n');
         g_buf[g_len] = '\0';
@@ -261,6 +273,7 @@ void shell_input_char(char c) {
         g_len = 0;
         g_history_pos = -1;
         print_prompt();
+        console_cursor_show();
         return;
     }
 
@@ -270,6 +283,7 @@ void shell_input_char(char c) {
             console_putchar('\b');
         }
         g_history_pos = -1; /* правка строки вручную — больше не "листаем" историю */
+        console_cursor_show();
         return;
     }
 
@@ -278,4 +292,5 @@ void shell_input_char(char c) {
         console_putchar(c);
     }
     g_history_pos = -1; /* правка строки вручную — больше не "листаем" историю */
+    console_cursor_show();
 }

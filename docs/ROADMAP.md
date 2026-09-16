@@ -1,4 +1,22 @@
+### 0.5.36 — USB controller stability and keyboard safety
+
+- [x] Harden xHCI BIOS/OS ownership handoff with a bounded timeout
+- [x] Wait for xHCI Controller Not Ready (CNR) to clear after reset
+- [x] Abort cleanly when an xHCI controller cannot reach the running state
+- [x] Bound xHCI event processing per normal-context pass
+- [x] Preserve PS/2 keyboard operation when USB controller initialization fails
+- [x] Keep multi-controller xHCI probing and fallback behavior
+- [ ] Full USB hotplug/device-class manager
+
 # ROADMAP.md — путь развития NexusOS
+
+## 0.5.35 — Colored core and service startup logs
+
+- Apply the compact startup log format to core initialization and services.
+- Add color-coded component names and status results.
+- Report GDT, IDT, kernel address space, PMM, VMM, virtual arena, allocator, event queue and scheduler startup.
+- Preserve short `[ OK ]` / `[ FAILED ]` boot output.
+
 
 После пивота на UEFI/x86_64 (`docs/adr/0002`) готовые куски не идут
 строго по порядку старого плана genesis→memoria→threadwork→archive→
@@ -392,6 +410,34 @@ complete. At that point the block receives a GitHub Release description.
 - [x] User ELF image/stack initialization through process translations
 - [ ] Copy-on-write / shared memory
 - [ ] Page-fault-driven demand mapping
+
+### 0.5.34 — Concise driver and service startup logs
+- Standardized startup lines to name, type, version and result.
+- Driver/service initialization reports `[ OK  ]` or `[ FAILED ]`.
+- Removed redundant verbose module startup summaries from the boot path.
+
+### 0.5.33 — Terminal scrollback shortcuts
+- Add Ctrl+Up/Ctrl+Down shortcuts for terminal scrollback.
+- Preserve Up/Down shell command history when Ctrl is not pressed.
+- Support the shortcut path for both PS/2 and USB HID keyboards.
+- Keep scrollback changes out of IRQ context by handling them in normal input processing.
+
+### 0.5.32 — Terminal text cursor
+
+- [x] Blinking text cursor in the command-line shell
+- [x] Cursor follows the active input position
+- [x] Cursor hides during shell redraw/output and graphical desktop mode
+- [x] PIT-driven cursor blink timing
+
+### 0.5.31 — Kernel driver modules foundation
+
+- [x] Add kernel module descriptor ABI for built-in drivers
+- [x] Add `.nexus_modules` linker section and module discovery
+- [x] Add priority-ordered driver module loading
+- [x] Add module runtime state and load diagnostics
+- [x] Move PCI/PIC/PIT/input/keyboard/mouse/network/NVMe/AHCI/USB/GPU initialization behind modules
+- [ ] External `.mod`/`.ko` runtime loading from filesystem
+- [ ] Module dependency graph and unload support
 
 ### 0.5.29 — Multi-controller xHCI and Intel real-hardware USB bring-up
 

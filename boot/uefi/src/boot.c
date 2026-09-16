@@ -432,6 +432,7 @@ static void detect_system_identity(nexus_boot_info_t *bi) {
     bi->system_info_valid = 0;
     bi->system_manufacturer[0] = '\0';
     bi->system_product[0] = '\0';
+    bi->baseboard_manufacturer[0] = '\0';
     if (!g_st || !g_st->ConfigurationTable || !g_st->NumberOfTableEntries) return;
 
     /* SMBIOS 2.x and 3.x EFI configuration table GUIDs. */
@@ -473,13 +474,18 @@ static void detect_system_identity(nexus_boot_info_t *bi) {
             uint8_t manufacturer = p[4];
             uint8_t product = p[5];
             uint8_t *strings = p + len;
+            int got_manufacturer = ascii_copy_smbios_string(strings, end, manufacturer,
+                                          bi->system_manufacturer, sizeof(bi->system_manufacturer));
+            int got_product = ascii_copy_smbios_string(strings, end, product,
+                                          bi->system_product, sizeof(bi->system_product));
+            if (got_manufacturer || got_product) bi->system_info_valid = 1;
+        } else if (type == 2) { /* Baseboard Information */
+            uint8_t manufacturer = p[4];
+            uint8_t *strings = p + len;
             if (ascii_copy_smbios_string(strings, end, manufacturer,
-                                          bi->system_manufacturer, sizeof(bi->system_manufacturer)) ||
-                ascii_copy_smbios_string(strings, end, product,
-                                          bi->system_product, sizeof(bi->system_product))) {
-                bi->system_info_valid = 1;
+                                         bi->baseboard_manufacturer, sizeof(bi->baseboard_manufacturer))) {
+                /* Baseboard manufacturer is enough for the interactive shell host. */
             }
-            return;
         }
         uint8_t *q = p + len;
         while (q + 1 < end && !(q[0] == 0 && q[1] == 0)) q++;

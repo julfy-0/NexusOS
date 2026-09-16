@@ -8,7 +8,7 @@ set -u -o pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-VERSION="0.5.29"
+VERSION="0.5.37"
 ISO_IMAGE="build/NexusOS-${VERSION}.iso"
 BAR_WIDTH=26
 LOG_FILE="build_output.txt"
@@ -114,7 +114,7 @@ BOOT_ARTIFACTS=(
 SYSTEM_ARTIFACTS=(
     "iso/EFI/BOOT/BOOTX64.EFI"
     "iso/kernel.elf"
-    "build/NexusOS-0.5.29.iso"
+    "build/NexusOS-0.5.37.iso"
 )
 
 # OS = unique set of all real build/staging artifacts. No artificial counters.

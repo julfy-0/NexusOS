@@ -1,3 +1,178 @@
+## NexusOS 0.5.37 — Shell Identity and Hardware Hostname
+
+### Added
+- Root/user-aware shell prompt format.
+- Motherboard manufacturer detection from SMBIOS/DMI Baseboard Information.
+- Hardware-derived shell hostname.
+
+### Shell
+- Kernel shell prompt now uses `root@<manufacturer>` or the active user identity.
+- The motherboard manufacturer is used as the hostname.
+- Existing shell command history and terminal cursor behavior are preserved.
+
+### Hardware
+- SMBIOS Type 2 Baseboard Information is parsed by the UEFI loader.
+- System manufacturer remains the fallback when baseboard manufacturer data is unavailable.
+- Firmware-owned pointers are still copied before `ExitBootServices()`.
+
+### Notes
+- Colored startup logs from NexusOS 0.5.35 are preserved.
+- USB stability changes from NexusOS 0.5.36 are preserved.
+- Higher-half kernel work remains intentionally deferred to preserve boot stability.
+
+## NexusOS 0.5.36 — USB Controller Stability and Keyboard Safety
+
+### Added
+- Safer xHCI BIOS ownership handoff.
+- xHCI controller-not-ready and start-state checks.
+- Bounded xHCI event polling budget.
+- Clear USB initialization failure reasons.
+
+### USB
+- xHCI initialization now aborts cleanly when firmware ownership cannot be transferred.
+- Host controller reset waits for Controller Not Ready (CNR) to clear.
+- xHCI startup failure no longer proceeds into an invalid controller state.
+- Multiple detected xHCI controllers continue to be tried until one initializes successfully.
+
+### Input
+- A broken USB controller can no longer monopolize normal-context event processing indefinitely.
+- PS/2 keyboard remains available when xHCI initialization fails.
+- USB HID polling is bounded per event-processing pass.
+
+### Notes
+- Multi-controller xHCI support from NexusOS 0.5.29 is preserved.
+- Driver module startup logging and colored status output remain unchanged.
+- Higher-half kernel work remains intentionally deferred to preserve boot stability.
+
+## NexusOS 0.5.35 — Colored Core and Service Startup Logs
+
+### Added
+- Colored startup status output for core services and driver modules.
+- Unified component startup format with name, type, version and status.
+- Core initialization entries for GDT, IDT, kernel address space, physical memory manager, virtual memory manager, virtual arena, allocator, event queue and scheduler.
+
+### Boot Logs
+- Component names are highlighted in cyan.
+- Successful initialization uses green `[ OK  ]`.
+- Failed initialization uses red `[ FAILED ]`.
+- Service and driver types remain visible next to their versions.
+- Boot output stays compact without verbose subsystem diagnostics.
+
+### Core Services
+- GDT and IDT startup now use the same status format as driver modules.
+- Kernel address space initialization is reported as a service.
+- Physical memory manager reports failure when no usable memory map is available.
+- Virtual memory manager, virtual arena, allocator, event queue and scheduler report independent startup status.
+
+### Notes
+- NexusOS 0.5.34 concise startup logging is preserved and extended with color.
+- Driver module loading from NexusOS 0.5.30 remains unchanged.
+- Multi-controller xHCI support from NexusOS 0.5.29 remains unchanged.
+- Higher-half kernel work remains intentionally deferred to preserve boot stability.
+
+## NexusOS 0.5.34 — Concise Driver and Service Startup Logs
+
+### Added
+- Compact startup status lines for drivers and services.
+- Module name, type, version and initialization result in one line.
+
+### Boot Logs
+- Successful components use `[ OK  ]`.
+- Failed components use `[ FAILED ]`.
+- Driver and service versions are shown directly in the startup line.
+- Redundant hardware/module diagnostics are removed from the normal boot path.
+
+### Module Manager
+- Existing priority-based module loading is preserved.
+- Driver module version information is displayed at load time.
+- Driver and service startup uses a unified status format.
+
+### Notes
+- Driver module architecture from NexusOS 0.5.30 is preserved.
+- Multi-controller xHCI support from NexusOS 0.5.29 is preserved.
+- Terminal scrollback shortcuts from NexusOS 0.5.33 are preserved.
+- Higher-half kernel work remains intentionally deferred to preserve boot stability.
+
+## NexusOS 0.5.33 — Terminal Scrollback Shortcuts
+
+### Added
+- Ctrl+Arrow terminal scrollback shortcuts.
+- One-line scrollback navigation with Ctrl+Up and Ctrl+Down.
+
+### Terminal
+- Ctrl+Up scrolls the terminal one line toward older output.
+- Ctrl+Down scrolls the terminal one line toward newer output.
+- Existing Up/Down shell history navigation remains unchanged when Ctrl is not held.
+- PageUp/PageDown continue to provide direct scrollback navigation.
+
+### Input
+- Added Ctrl modifier handling for PS/2 arrow navigation.
+- Added Ctrl modifier handling for USB HID keyboard reports.
+- Ctrl+Arrow shortcuts are ignored by the shell history handler.
+
+### Notes
+- Terminal text cursor from NexusOS 0.5.32 is preserved.
+- Driver module load status from NexusOS 0.5.31 is preserved.
+- Multi-controller xHCI support from NexusOS 0.5.29 is preserved.
+- Higher-half kernel work remains intentionally deferred to preserve boot stability.
+
+## NexusOS 0.5.32 — Terminal Text Cursor
+
+### Added
+- Blinking terminal text cursor for the NexusOS command line.
+- Cursor visibility control for shell and graphical desktop transitions.
+- PIT-driven cursor blink timing.
+
+### Terminal
+- Cursor is rendered at the active shell input position.
+- Cursor is hidden while the input line is being edited or command output is rendered.
+- Cursor is restored after shell input and history navigation.
+- Cursor is automatically removed while the graphical desktop is active.
+
+### Notes
+- Driver module logging from NexusOS 0.5.31 is preserved.
+- Multi-controller xHCI support from NexusOS 0.5.29 is preserved.
+- Higher-half kernel work remains intentionally deferred to preserve boot stability.
+
+## NexusOS 0.5.31 — Driver Module Load Status
+
+### Added
+- Per-module startup status lines for built-in kernel drivers.
+- Clear `[ OK ]` and `[ FAILED ]` load results.
+
+### Driver Logs
+- Driver initialization now prints entries such as `USB driver module [ OK ]`.
+- Each registered driver module reports its result immediately after initialization.
+- Failed modules are reported explicitly instead of only contributing to the final summary.
+
+### Module Manager
+- Module state tracking remains unchanged.
+- Existing priority-based loading order is preserved.
+- Driver module diagnostics use the common module-loading path.
+
+### Notes
+- NexusOS 0.5.30 built-in driver modules remain preserved.
+- NexusOS 0.5.29 multi-controller xHCI support remains preserved.
+- External `.mod` / `.ko` loading remains future work.
+- Higher-half kernel work remains intentionally deferred to preserve boot stability.
+
+## NexusOS 0.5.30 — Kernel Driver Modules Foundation
+
+### Added
+- Kernel module descriptor ABI for hardware drivers.
+- Built-in driver module discovery through the `.nexus_modules` linker section.
+- Priority-ordered module loading at kernel startup.
+- Runtime module state and load diagnostics.
+
+### Drivers
+- PCI, PIC, PIT, input, keyboard, mouse, network, NVMe, AHCI, USB and GPU initialization now runs through the module manager.
+- Existing driver APIs and hardware implementations remain intact.
+
+### Notes
+- 0.5.29 multi-controller xHCI support is preserved.
+- Current modules are built-in kernel modules linked into `kernel.elf`; external `.mod`/`.ko` filesystem loading remains future work.
+- Higher-half kernel work remains intentionally deferred to preserve boot stability.
+
 ## NexusOS 0.5.29 — Multi-Controller xHCI and Intel USB Compatibility
 
 ### Added
