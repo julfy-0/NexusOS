@@ -4,6 +4,7 @@
 #include "shell.h"
 #include "nexus_version.h"
 #include "console.h"
+#include "gui.h"
 #include "vfs.h"
 #include "mount.h"
 #include "command_registry.h"
@@ -14,6 +15,7 @@ extern int strcmp(const char *a, const char *b);
 
 #define SHELL_BUF_SIZE 256
 #define HISTORY_SIZE 8
+#define SHELL_COMMAND_QUEUE_SIZE 4
 
 static char g_buf[SHELL_BUF_SIZE];
 static int g_len;
@@ -21,6 +23,14 @@ static int g_len;
 static char g_history[HISTORY_SIZE][SHELL_BUF_SIZE];
 static int g_history_count;
 static int g_history_next;
+
+/* Commands are executed outside the keyboard/xHCI event-drain path.  This
+ * keeps input handling bounded even when a command performs heavy console,
+ * filesystem, scheduler, or device work. */
+static char g_pending_commands[SHELL_COMMAND_QUEUE_SIZE][SHELL_BUF_SIZE];
+static uint32_t g_pending_head;
+static uint32_t g_pending_tail;
+static uint32_t g_pending_count;
 
 /* Пролистывание истории стрелками Вверх/Вниз прямо в строке ввода.
  * g_history_pos: -1 = не листаем (набирается новая строка), 0 = самая
@@ -130,6 +140,37 @@ void shell_history_next(void) {
 
 #define SHELL_IO_BUF_SIZE 2048
 
+static int queue_command(const char *cmd) {
+    if (!cmd || !cmd[0] || g_pending_count >= SHELL_COMMAND_QUEUE_SIZE) {
+        return 0;
+    }
+
+    int i = 0;
+    while (cmd[i] && i < SHELL_BUF_SIZE - 1) {
+        g_pending_commands[g_pending_head][i] = cmd[i];
+        i++;
+    }
+    g_pending_commands[g_pending_head][i] = '\0';
+    g_pending_head = (g_pending_head + 1u) % SHELL_COMMAND_QUEUE_SIZE;
+    g_pending_count++;
+    return 1;
+}
+
+static int dequeue_command(char *out) {
+    if (!out || g_pending_count == 0) return 0;
+
+    int i = 0;
+    while (g_pending_commands[g_pending_tail][i] && i < SHELL_BUF_SIZE - 1) {
+        out[i] = g_pending_commands[g_pending_tail][i];
+        i++;
+    }
+    out[i] = '\0';
+    g_pending_commands[g_pending_tail][0] = '\0';
+    g_pending_tail = (g_pending_tail + 1u) % SHELL_COMMAND_QUEUE_SIZE;
+    g_pending_count--;
+    return 1;
+}
+
 /* Build the legacy command argument string from parsed argv plus the shell's
  * current stdin payload. Existing commands keep their current API while the
  * shell gains a small, bounded I/O transport. */
@@ -237,11 +278,26 @@ static void execute(char *cmd) {
     }
 }
 
+void shell_process_pending(void) {
+    char command[SHELL_BUF_SIZE];
+    if (!dequeue_command(command)) return;
+
+    execute(command);
+    if (!gui_is_active()) {
+        print_prompt();
+        console_cursor_show();
+    }
+}
+
 void shell_init(void) {
     g_len = 0;
     g_history_count = 0;
     g_history_next = 0;
     g_history_pos = -1;
+    g_pending_head = 0;
+    g_pending_tail = 0;
+    g_pending_count = 0;
+    for (uint32_t i = 0; i < SHELL_COMMAND_QUEUE_SIZE; i++) g_pending_commands[i][0] = '\0';
     vfs_init();
     vfs_mount_init();
     console_clear();
@@ -269,10 +325,16 @@ void shell_input_char(char c) {
         console_putchar('\n');
         g_buf[g_len] = '\0';
         history_add(g_buf);
-        execute(g_buf);
+        if (g_buf[0] != '\0') {
+            if (!queue_command(g_buf)) {
+                console_print("shell: command queue is full; try again\n");
+                print_prompt();
+            }
+        } else {
+            print_prompt();
+        }
         g_len = 0;
         g_history_pos = -1;
-        print_prompt();
         console_cursor_show();
         return;
     }

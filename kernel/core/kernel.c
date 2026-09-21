@@ -44,6 +44,7 @@
 #include "network.h"
 #include "module.h"
 #include "watchdog.h"
+#include "heap.h"
 #include "panic.h"
 
 static volatile uint64_t g_scheduler_service_ticks;
@@ -171,6 +172,9 @@ void kmain(nexus_boot_info_t *boot_info) {
 
     for (;;) {
         nexus_watchdog_heartbeat();
+        if (!heap_validate()) {
+            critical_os_stop("kernel heap integrity check failed");
+        }
         if (nexus_watchdog_trip_pending()) {
             nexus_watchdog_clear_trip();
             critical_os_stop("normal kernel execution stalled for more than 3 seconds");
@@ -181,6 +185,12 @@ void kmain(nexus_boot_info_t *boot_info) {
          * event-queue boundary: shell commands are no longer
          * executed from an interrupt handler. */
         kernel_events_process();
+        /* Shell commands are deliberately deferred until after the input/event
+         * drain. This prevents a command from blocking the keyboard/xHCI event
+         * path and makes command execution a separate normal-context phase. */
+        if (!gui_is_active()) {
+            shell_process_pending();
+        }
         if (gui_is_active()) {
             console_cursor_disable();
             gui_update();

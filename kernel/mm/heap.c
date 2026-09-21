@@ -33,6 +33,7 @@ static uint64_t g_heap_pages;
 static uint64_t g_used_bytes;
 static uint64_t g_free_bytes;
 static uint64_t g_allocations;
+static uint64_t g_corruption_count;
 static int g_ready;
 
 static uint64_t align_up_u64(uint64_t value, uint64_t alignment) {
@@ -134,6 +135,53 @@ static void merge_with_next(heap_block_t *block) {
     if (block->next != NULL) block->next->prev = block;
 }
 
+static int ptr_in_heap(uint64_t addr) {
+    return addr >= HEAP_BASE && addr < g_heap_next;
+}
+
+static int block_basic_valid(const heap_block_t *block) {
+    if (block == NULL) return 0;
+    uint64_t addr = (uint64_t)(uintptr_t)block;
+    if (!ptr_in_heap(addr)) return 0;
+    if (block->magic != BLOCK_MAGIC) return 0;
+    if (block->capacity == 0 || block->size > block->capacity) return 0;
+    uint64_t end = addr + HEADER_SIZE + block->capacity;
+    if (end < addr || end > g_heap_next) return 0;
+    if (block->prev != NULL && !ptr_in_heap((uint64_t)(uintptr_t)block->prev)) return 0;
+    if (block->next != NULL && !ptr_in_heap((uint64_t)(uintptr_t)block->next)) return 0;
+    return 1;
+}
+
+int heap_validate(void) {
+    if (!g_ready) return 0;
+    uint64_t seen = 0;
+    heap_block_t *prev = NULL;
+    for (heap_block_t *block = g_head; block != NULL; block = block->next) {
+        if (seen++ > 1000000ULL) {
+            g_corruption_count++;
+            return 0;
+        }
+        if (!block_basic_valid(block) || block->prev != prev) {
+            g_corruption_count++;
+            return 0;
+        }
+        if (block->next != NULL && block->next->prev != block) {
+            g_corruption_count++;
+            return 0;
+        }
+        if (block->flags & ~BLOCK_FREE) {
+            g_corruption_count++;
+            return 0;
+        }
+        prev = block;
+    }
+    if (g_head != NULL && g_head->prev != NULL) {
+        g_corruption_count++;
+        return 0;
+    }
+    return 1;
+}
+
 void heap_init(void) {
     g_head = NULL;
     g_heap_next = HEAP_BASE;
@@ -141,6 +189,7 @@ void heap_init(void) {
     g_used_bytes = 0;
     g_free_bytes = 0;
     g_allocations = 0;
+    g_corruption_count = 0;
     g_ready = vmm_page_size() == PAGE_SIZE && pmm_total_pages() != 0;
 }
 
@@ -152,6 +201,10 @@ void *kmalloc(size_t size) {
 
     int restore_if = interrupts_were_enabled();
     heap_lock();
+    if (!heap_validate()) {
+        heap_unlock(restore_if);
+        return NULL;
+    }
 
     /* First-fit. Free blocks keep their virtual pages mapped for fast reuse. */
     for (heap_block_t *block = g_head; block != NULL; block = block->next) {
@@ -219,6 +272,10 @@ void kfree(void *ptr) {
 
     int restore_if = interrupts_were_enabled();
     heap_lock();
+    if (!heap_validate()) {
+        heap_unlock(restore_if);
+        return;
+    }
 
     if (block->magic != BLOCK_MAGIC || (block->flags & BLOCK_FREE)) {
         heap_unlock(restore_if);
@@ -248,3 +305,4 @@ uint64_t heap_mapped_pages(void) { return g_heap_pages; }
 uint64_t heap_used_bytes(void) { return g_used_bytes; }
 uint64_t heap_free_bytes(void) { return g_free_bytes; }
 uint64_t heap_allocations(void) { return g_allocations; }
+uint64_t heap_corruption_count(void) { return g_corruption_count; }

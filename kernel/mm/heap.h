@@ -22,5 +22,7 @@ uint64_t heap_mapped_pages(void);
 uint64_t heap_used_bytes(void);
 uint64_t heap_free_bytes(void);
 uint64_t heap_allocations(void);
+int heap_validate(void);
+uint64_t heap_corruption_count(void);
 
 #endif

@@ -18,4 +18,8 @@ void shell_history_next(void);
 /* Print the stored command history. */
 void shell_history_print(void);
 
+/* Execute one queued command in normal kernel context, outside the input event
+ * drain path. Returns immediately when no command is pending. */
+void shell_process_pending(void);
+
 #endif

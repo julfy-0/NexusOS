@@ -3,6 +3,7 @@
 #include "vmm.h"
 #include "pmm.h"
 #include "paging.h"
+#include "ipc.h"
 
 #define PAGE_SIZE 4096ULL
 
@@ -44,6 +45,8 @@ uint64_t process_create(uint64_t parent_pid) {
             p->pid = g_next_pid++;
             if (p->pid == PROCESS_INVALID_PID) p->pid = g_next_pid++;
             p->parent_pid = parent_pid;
+            nexus_process_t *parent = process_get(parent_pid);
+            p->capabilities = parent ? parent->capabilities : NEXUS_CAP_ALL;
             p->start_tick = scheduler_ticks();
             p->cpu_ticks = 0;
             p->heap_base = 0x0000000010000000ULL;
@@ -71,6 +74,7 @@ uint64_t process_create(uint64_t parent_pid) {
             }
             p->kernel_stack = 0;
             p->scheduler_thread_id = 0;
+            for (uint64_t j = 0; j < PROCESS_MAX_CHANNELS; ++j) p->ipc_handles[j] = 0;
             for (uint64_t j = 0; j < PROCESS_MAX_FDS; ++j) {
                 p->fds[j].type = PROCESS_FD_UNUSED;
                 p->fds[j].flags = 0;
@@ -137,6 +141,8 @@ int process_exit_with_code(uint64_t pid, uint64_t exit_code, uint32_t exit_reaso
         return 0;
     }
 
+    nexus_ipc_process_terminate(pid);
+
     /* Do not destroy the current process address space here. A user syscall or
      * exception is still executing on this process's kernel stack. The
      * scheduler reaps the process only after another TCB is running. */
@@ -179,6 +185,7 @@ int process_reap(uint64_t pid, uint64_t scheduler_thread_id) {
     p->address_space_cr3 = 0;
     if (cr3) paging_destroy_address_space(cr3);
 
+    process_ipc_reset_handles(pid);
     p->kernel_stack = 0;
     p->scheduler_thread_id = 0;
     for (uint64_t j = 0; j < PROCESS_MAX_FDS; ++j) {
@@ -475,6 +482,30 @@ int process_get_name(uint64_t pid, char *out, uint64_t size) {
     if (!p || !out || size == 0) return 0;
     local_copy(out, p->name, size); return 1;
 }
+int process_has_capability(uint64_t pid, uint64_t capability) {
+    nexus_process_t *p = process_get(pid);
+    return p && nexus_capability_valid(capability) && (p->capabilities & capability) == capability;
+}
+
+nexus_capability_mask_t process_get_capabilities(uint64_t pid) {
+    nexus_process_t *p = process_get(pid);
+    return p ? p->capabilities : 0;
+}
+
+int process_drop_capability(uint64_t pid, uint64_t capability) {
+    nexus_process_t *p = process_get(pid);
+    if (!p || !nexus_capability_valid(capability)) return 0;
+    p->capabilities &= ~capability;
+    return 1;
+}
+
+int process_grant_capability(uint64_t pid, uint64_t capability) {
+    nexus_process_t *p = process_get(pid);
+    if (!p || !nexus_capability_valid(capability)) return 0;
+    p->capabilities |= capability;
+    return 1;
+}
+
 int process_set_priority(uint64_t pid, uint32_t priority) {
     nexus_process_t *p = process_get(pid);
     if (!p || p->state == PROCESS_ZOMBIE || priority > 31) return 0;
@@ -534,4 +565,11 @@ uint64_t process_alloc_user_range(uint64_t pid, uint64_t pages, uint64_t flags) 
     uint64_t bytes=pages*PAGE_SIZE; if(bytes/pages!=PAGE_SIZE||base>PROCESS_USER_LIMIT-bytes)return 0;
     for(uint64_t i=0;i<pages;i++) if(!process_map_user_page(pid,base+i*PAGE_SIZE,flags)) { process_unmap_user_range(pid,base,i*PAGE_SIZE); return 0; }
     p->heap_end=base+bytes; return base;
+}
+
+
+void process_ipc_reset_handles(uint64_t pid) {
+    nexus_process_t *p = process_get(pid);
+    if (!p) return;
+    for (uint64_t i = 0; i < PROCESS_MAX_CHANNELS; ++i) p->ipc_handles[i] = 0;
 }

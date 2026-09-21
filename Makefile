@@ -1,4 +1,4 @@
-# NexusOS 0.6.2 — Enstein
+# NexusOS 0.7 — Enstein
 #
 # This Makefile is the single source of truth for compilation and linking.
 # build.sh is only a progress/UX frontend around the real targets below.
@@ -12,7 +12,7 @@ OBJCOPY ?= objcopy
 
 BUILD  := build
 ISODIR := iso
-NEXUS_VERSION ?= 0.6.5
+NEXUS_VERSION ?= 0.7
 ISO_IMAGE := $(BUILD)/NexusOS-$(NEXUS_VERSION).iso
 
 # -----------------------------------------------------------------------------
@@ -170,12 +170,31 @@ run: iso
 # Validation
 # -----------------------------------------------------------------------------
 
+USER_RUNTIME_C_SRCS := $(shell find user/runtime -type f -name '*.c' 2>/dev/null | sort)
+USER_RUNTIME_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(USER_RUNTIME_C_SRCS))
+CFLAGS_USER := -ffreestanding -fno-stack-protector -fno-stack-check -mno-red-zone \
+               -mno-sse -mno-sse2 -mno-mmx -mgeneral-regs-only -fno-ident \
+               -Wall -Wextra -O2 -Iinclude/nexus -Iuser/runtime
+
+.PHONY: user-runtime
+user-runtime: $(USER_RUNTIME_OBJS)
+	@echo "==> Nexus Runtime userspace: $(words $(USER_RUNTIME_OBJS)) object(s) ready"
+
+$(BUILD)/user/runtime/%.o: user/runtime/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_USER) -MMD -MP -c $< -o $@
+
 check:
 	@set -e; \
 	for f in $$(find kernel drivers fs lib gui shell platform system -type f -name '*.c' ! -path 'kernel/bootmode/*' ! -path 'system/core/init.c' ! -path 'system/core/system.c' | sort); do \
 		$(CC) $(CFLAGS_KERNEL) -fsyntax-only "$$f"; \
 	done
 	@echo "==> Kernel-side C syntax: OK"
+	@set -e; \
+	for f in $$(find user/runtime -type f -name '*.c' | sort); do \
+		$(CC) $(CFLAGS_USER) -fsyntax-only "$$f"; \
+	done
+	@echo "==> Nexus Runtime userspace C syntax: OK"
 	@$(MAKE) --no-print-directory check-boot
 
 check-boot:

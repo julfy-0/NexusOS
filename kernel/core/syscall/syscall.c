@@ -8,6 +8,10 @@
 #include "usermode.h"
 #include "pmm.h"
 #include "nexus_version.h"
+#include "runtime.h"
+#include "ipc.h"
+#include "runtime_abi.h"
+#include "capability.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -50,7 +54,7 @@ static int copy_user_string(uint64_t pid, uint64_t va, char *out, uint64_t cap) 
 void syscall_init(void) { g_ready = 1; }
 int syscall_ready(void) { return g_ready; }
 
-uint64_t syscall_dispatch(uint64_t number, uint64_t a0, uint64_t a1, uint64_t a2) {
+uint64_t syscall_dispatch(uint64_t number, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
     nexus_process_t *p = process_current();
     if (!g_ready || !p || p->state != PROCESS_RUNNING || p->scheduler_thread_id == 0 ||
         !(p->flags & PROCESS_FLAG_USER_CONTEXT)) return (uint64_t)-1;
@@ -60,7 +64,7 @@ uint64_t syscall_dispatch(uint64_t number, uint64_t a0, uint64_t a1, uint64_t a2
         case NEXUS_SYS_GETPID: return p->pid;
         case NEXUS_SYS_GETPPID: return p->parent_pid;
         case NEXUS_SYS_GETPRIORITY: return p->priority;
-        case NEXUS_SYS_SETPRIORITY: return process_set_priority(p->pid,(uint32_t)a0)?0:(uint64_t)-1;
+        case NEXUS_SYS_SETPRIORITY: if (!process_has_capability(p->pid, NEXUS_CAP_PROCESS_CONTROL)) return (uint64_t)-1; return process_set_priority(p->pid,(uint32_t)a0)?0:(uint64_t)-1;
         case NEXUS_SYS_GETNAME: {
             if (!process_user_range_valid(p->pid,a0,a1,VMM_PAGE_WRITABLE) || a1==0 || a1>256) return (uint64_t)-1;
             char n[PROCESS_NAME_LEN]; if(!process_get_name(p->pid,n,sizeof(n))) return (uint64_t)-1;
@@ -93,16 +97,38 @@ uint64_t syscall_dispatch(uint64_t number, uint64_t a0, uint64_t a1, uint64_t a2
             char b[SYSCALL_MAX_RW]; int n=process_fd_read(p->pid,a0,b,a2); if(n<0)return(uint64_t)-1; if(!process_user_write(p->pid,a1,b,(uint64_t)n))return(uint64_t)-1; return(uint64_t)n;
         }
         case NEXUS_SYS_OPEN: {
+            if (!process_has_capability(p->pid, NEXUS_CAP_FILESYSTEM_READ)) return (uint64_t)-1;
             char path[PROCESS_CWD_LEN]; if(!copy_user_string(p->pid,a0,path,sizeof(path)))return(uint64_t)-1; int fd=process_fd_open(p->pid,path,(uint32_t)a1); return fd<0?(uint64_t)-1:(uint64_t)fd;
         }
         case NEXUS_SYS_CLOSE: return process_fd_close(p->pid,a0)?0:(uint64_t)-1;
         case NEXUS_SYS_SEEK: { uint64_t pos=0; if(!process_fd_seek(p->pid,a0,(int64_t)a1,(uint32_t)a2,&pos))return(uint64_t)-1; return pos; }
         case NEXUS_SYS_TELL: { uint64_t pos=0; if(!process_fd_tell(p->pid,a0,&pos))return(uint64_t)-1; return pos; }
         case NEXUS_SYS_STAT: { char path[PROCESS_CWD_LEN]; if(!copy_user_string(p->pid,a0,path,sizeof(path))||!process_user_range_valid(p->pid,a1,sizeof(nexus_stat_t),VMM_PAGE_WRITABLE))return(uint64_t)-1; uint64_t sz=0; if(vfs_file_size_path(path,&sz)==0){nexus_stat_t st={sz,1,0}; return process_user_write(p->pid,a1,&st,sizeof(st))?0:(uint64_t)-1;} if(vfs_is_dir_path(path)){nexus_stat_t st={0,2,0}; return process_user_write(p->pid,a1,&st,sizeof(st))?0:(uint64_t)-1;} return(uint64_t)-1; }
-        case NEXUS_SYS_MKDIR: { char path[PROCESS_CWD_LEN]; if(!copy_user_string(p->pid,a0,path,sizeof(path)))return(uint64_t)-1; return vfs_mkdir_path(path)==0?0:(uint64_t)-1; }
-        case NEXUS_SYS_RMDIR: { char path[PROCESS_CWD_LEN]; if(!copy_user_string(p->pid,a0,path,sizeof(path)))return(uint64_t)-1; return vfs_unlink_path(path)==0?0:(uint64_t)-1; }
-        case NEXUS_SYS_UNLINK: { char path[PROCESS_CWD_LEN]; if(!copy_user_string(p->pid,a0,path,sizeof(path)))return(uint64_t)-1; return vfs_unlink_path(path)==0?0:(uint64_t)-1; }
-        case NEXUS_SYS_RENAME: { char src[PROCESS_CWD_LEN],dst[PROCESS_CWD_LEN]; if(!copy_user_string(p->pid,a0,src,sizeof(src))||!copy_user_string(p->pid,a1,dst,sizeof(dst)))return(uint64_t)-1; return vfs_rename_path(src,dst)==0?0:(uint64_t)-1; }
+        case NEXUS_SYS_MKDIR: {
+            if (!process_has_capability(p->pid, NEXUS_CAP_FILESYSTEM_WRITE)) return (uint64_t)-1;
+            char path[PROCESS_CWD_LEN];
+            if (!copy_user_string(p->pid, a0, path, sizeof(path))) return (uint64_t)-1;
+            return vfs_mkdir_path(path) == 0 ? 0 : (uint64_t)-1;
+        }
+        case NEXUS_SYS_RMDIR: {
+            if (!process_has_capability(p->pid, NEXUS_CAP_FILESYSTEM_WRITE)) return (uint64_t)-1;
+            char path[PROCESS_CWD_LEN];
+            if (!copy_user_string(p->pid, a0, path, sizeof(path))) return (uint64_t)-1;
+            return vfs_unlink_path(path) == 0 ? 0 : (uint64_t)-1;
+        }
+        case NEXUS_SYS_UNLINK: {
+            if (!process_has_capability(p->pid, NEXUS_CAP_FILESYSTEM_WRITE)) return (uint64_t)-1;
+            char path[PROCESS_CWD_LEN];
+            if (!copy_user_string(p->pid, a0, path, sizeof(path))) return (uint64_t)-1;
+            return vfs_unlink_path(path) == 0 ? 0 : (uint64_t)-1;
+        }
+        case NEXUS_SYS_RENAME: {
+            if (!process_has_capability(p->pid, NEXUS_CAP_FILESYSTEM_WRITE)) return (uint64_t)-1;
+            char src[PROCESS_CWD_LEN], dst[PROCESS_CWD_LEN];
+            if (!copy_user_string(p->pid, a0, src, sizeof(src)) ||
+                !copy_user_string(p->pid, a1, dst, sizeof(dst))) return (uint64_t)-1;
+            return vfs_rename_path(src, dst) == 0 ? 0 : (uint64_t)-1;
+        }
         case NEXUS_SYS_PROCESS_ENUM: {
             if(a1==0||a2<sizeof(nexus_process_info_t)||!process_user_range_valid(p->pid,a0,a1,VMM_PAGE_WRITABLE))return(uint64_t)-1;
             uint64_t cap=a1/sizeof(nexus_process_info_t), n=0; for(uint64_t pid=1;pid<4096&&n<cap;pid++){ nexus_process_t*q=process_get(pid); if(!q)continue; nexus_process_info_t info={q->pid,q->parent_pid,(uint32_t)q->state,q->priority,q->cpu_ticks,q->start_tick}; if(!process_user_write(p->pid,a0+n*sizeof(info),&info,sizeof(info)))return(uint64_t)-1; n++; } return n;
@@ -111,16 +137,20 @@ uint64_t syscall_dispatch(uint64_t number, uint64_t a0, uint64_t a1, uint64_t a2
             uint64_t wanted=a0; for(uint64_t pid=1;pid<4096;pid++){ nexus_process_t*q=process_get(pid); if(!q||q->parent_pid!=p->pid||(wanted&&wanted!=pid)||q->state!=PROCESS_ZOMBIE)continue; if(a1 && process_user_range_valid(p->pid,a1,sizeof(uint64_t),VMM_PAGE_WRITABLE)){ if(!process_user_write(p->pid,a1,&q->exit_code,sizeof(uint64_t)))return(uint64_t)-1;} return pid; } return 0;
         }
         case NEXUS_SYS_EXEC: {
+            if (!process_has_capability(p->pid, NEXUS_CAP_PROCESS_SPAWN)) return (uint64_t)-1;
             char path[PROCESS_CWD_LEN]; if(!copy_user_string(p->pid,a0,path,sizeof(path)))return(uint64_t)-1; uint64_t child=process_create(p->pid); if(!child)return(uint64_t)-1; if(!nexus_elf_load_process(child,path)){process_exit(child);process_reap(child,0);return(uint64_t)-1;} uint64_t tid=thread_create_user_process(child); if(!tid){process_exit(child);process_reap(child,0);return(uint64_t)-1;} nexus_process_t*cp=process_get(child); if(!cp||!usermode_prepare(child,cp->user_entry,cp->user_stack_base,cp->kernel_stack)){process_exit(child);return(uint64_t)-1;} scheduler_request_reschedule(); return child;
         }
         case NEXUS_SYS_EXIT: return (uint64_t)-1;
         case NEXUS_SYS_MMAP: {
+            if (!process_has_capability(p->pid, NEXUS_CAP_MEMORY)) return (uint64_t)-1;
             uint64_t pages=(a1+4095ULL)/4096ULL; if(a1==0||pages==0)return(uint64_t)-1; uint64_t flags=VMM_PAGE_WRITABLE|VMM_PAGE_NX; return process_alloc_user_range(p->pid,pages,flags);
         }
         case NEXUS_SYS_MUNMAP: {
+            if (!process_has_capability(p->pid, NEXUS_CAP_MEMORY)) return (uint64_t)-1;
             return process_unmap_user_range(p->pid,a0,a1)==1?0:(uint64_t)-1;
         }
         case NEXUS_SYS_BRK: {
+            if (!process_has_capability(p->pid, NEXUS_CAP_MEMORY)) return (uint64_t)-1;
             uint64_t requested=a0; if(requested==0)return p->heap_end; if(requested<p->heap_base||requested>=PROCESS_USER_LIMIT)return(uint64_t)-1; uint64_t old=p->heap_end; if(requested>old){uint64_t pages=(requested-old+4095ULL)/4096ULL; uint64_t base=process_alloc_user_range(p->pid,pages,VMM_PAGE_WRITABLE|VMM_PAGE_NX); if(!base||base!=old)return(uint64_t)-1; p->heap_end=old+pages*4096ULL;} else if(requested<old){uint64_t cut=(old-requested+4095ULL)/4096ULL; uint64_t base=old-cut*4096ULL; if(!process_unmap_user_range(p->pid,base,cut*4096ULL))return(uint64_t)-1; p->heap_end=base;} return p->heap_end;
         }
         case NEXUS_SYS_GETCPUTICKS: return process_cpu_ticks(p->pid);
@@ -219,6 +249,56 @@ uint64_t syscall_dispatch(uint64_t number, uint64_t a0, uint64_t a1, uint64_t a2
         case NEXUS_SYS_GETTHREAD_RUNTIME:
             return scheduler_thread_runtime_ticks(a0);
 
+        case NEXUS_SYS_RUNTIME_INFO: {
+            if (!process_has_capability(p->pid, NEXUS_CAP_RUNTIME)) return (uint64_t)-1;
+            if (a1 != sizeof(nexus_runtime_info_t) ||
+                !process_user_range_valid(p->pid, a0, sizeof(nexus_runtime_info_t), VMM_PAGE_WRITABLE) ||
+                !nexus_runtime_ready()) return (uint64_t)-1;
+            nexus_runtime_info_t info;
+            if (!nexus_runtime_fill_info(p->pid, &info)) return (uint64_t)-1;
+            return process_user_write(p->pid, a0, &info, sizeof(info)) ? 0 : (uint64_t)-1;
+        }
+        case NEXUS_SYS_CHANNEL_CREATE: {
+            if (!process_has_capability(p->pid, NEXUS_CAP_IPC)) return (uint64_t)-1;
+            uint32_t handle = 0;
+            if (!nexus_ipc_create(p->pid, a0, &handle)) return (uint64_t)-1;
+            return handle;
+        }
+        case NEXUS_SYS_CHANNEL_CLOSE:
+            if (!process_has_capability(p->pid, NEXUS_CAP_IPC)) return (uint64_t)-1;
+            return nexus_ipc_close(p->pid, (uint32_t)a0) ? 0 : (uint64_t)-1;
+        case NEXUS_SYS_CHANNEL_SEND: {
+            if (!process_has_capability(p->pid, NEXUS_CAP_IPC)) return (uint64_t)-1;
+            if (a2 == 0 || a2 > NEXUS_CHANNEL_MESSAGE_MAX ||
+                !process_user_range_valid(p->pid, a1, a2, 0)) return (uint64_t)-1;
+            uint8_t buffer[NEXUS_CHANNEL_MESSAGE_MAX];
+            if (!process_user_read(p->pid, a1, buffer, a2)) return (uint64_t)-1;
+            int sent = nexus_ipc_send(p->pid, (uint32_t)a0, buffer, (uint32_t)a2);
+            return sent < 0 ? (uint64_t)-1 : (uint64_t)sent;
+        }
+        case NEXUS_SYS_CHANNEL_RECV: {
+            if (!process_has_capability(p->pid, NEXUS_CAP_IPC)) return (uint64_t)-1;
+            if (a2 == 0 || a2 > NEXUS_CHANNEL_MESSAGE_MAX ||
+                !process_user_range_valid(p->pid, a1, a2, VMM_PAGE_WRITABLE) ||
+                !process_user_range_valid(p->pid, a3, sizeof(uint32_t), VMM_PAGE_WRITABLE)) return (uint64_t)-1;
+            uint8_t buffer[NEXUS_CHANNEL_MESSAGE_MAX];
+            uint32_t received = 0;
+            if (!nexus_ipc_recv(p->pid, (uint32_t)a0, buffer, (uint32_t)a2, &received)) return 0;
+            if (!process_user_write(p->pid, a1, buffer, received) ||
+                !process_user_write(p->pid, a3, &received, sizeof(received))) return (uint64_t)-1;
+            return received;
+        }
+        case NEXUS_SYS_CHANNEL_POLL:
+            if (!process_has_capability(p->pid, NEXUS_CAP_IPC)) return (uint64_t)-1;
+            return nexus_ipc_poll(p->pid, (uint32_t)a0);
+
+        case NEXUS_SYS_GETCAPS:
+            if (!process_user_range_valid(p->pid, a0, sizeof(uint64_t), VMM_PAGE_WRITABLE)) return (uint64_t)-1;
+            { uint64_t caps = process_get_capabilities(p->pid); return process_user_write(p->pid, a0, &caps, sizeof(caps)) ? 0 : (uint64_t)-1; }
+        case NEXUS_SYS_HAS_CAP:
+            return process_has_capability(p->pid, a0) ? 1 : 0;
+        case NEXUS_SYS_DROP_CAP:
+            return process_drop_capability(p->pid, a0) ? 0 : (uint64_t)-1;
         default: return (uint64_t)-1;
     }
 }
@@ -237,5 +317,5 @@ uint64_t syscall_interrupt_handler(uint64_t *frame) {
     if(!g_ready||!syscall_frame_valid(f)){f->rax=(uint64_t)-1;return NEXUS_SYSCALL_ACTION_RETURN;}
     nexus_process_t*p=process_current(); if(!p||p->state!=PROCESS_RUNNING||!p->scheduler_thread_id||!(p->flags&PROCESS_FLAG_USER_CONTEXT)||!process_user_range_valid(p->pid,f->rip,1,0)||!process_user_range_valid(p->pid,f->user_rsp,1,VMM_PAGE_WRITABLE)){f->rax=(uint64_t)-1;return NEXUS_SYSCALL_ACTION_RETURN;}
     if(f->rax==NEXUS_SYS_EXIT){ if(!process_exit_with_code(p->pid,f->rdi,1)){f->rax=(uint64_t)-1;return NEXUS_SYSCALL_ACTION_RETURN;} thread_exit(); return NEXUS_SYSCALL_ACTION_EXIT; }
-    f->rax=syscall_dispatch(f->rax,f->rdi,f->rsi,f->rdx); return NEXUS_SYSCALL_ACTION_RETURN;
+    f->rax=syscall_dispatch(f->rax,f->rdi,f->rsi,f->rdx,f->r10); return NEXUS_SYSCALL_ACTION_RETURN;
 }

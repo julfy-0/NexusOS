@@ -1,3 +1,29 @@
+# NexusOS Roadmap
+
+### 0.7 — Nexus Native Architecture foundation
+
+- [x] Public append-only syscall ABI
+- [x] Nexus Runtime ABI
+- [x] Nexus Channel IPC foundation
+- [x] Per-process IPC handles
+- [x] Runtime info syscall
+- [x] Userspace runtime syscall wrappers
+- [x] Full service/IPC dependency manager
+- [x] Native capability system
+  - [x] Per-process capability bitmap
+  - [x] Capability inheritance on process creation
+  - [x] Capability-gated filesystem/process/memory/runtime/IPC syscalls
+  - [x] Userspace capability query and voluntary capability drop
+- [ ] Native application runtime
+- [ ] External application packages
+
+### 0.6.6 — Kernel Heap Integrity and Stability
+
+- [x] Heap metadata integrity validation
+- [x] Heap corruption counter
+- [x] Allocation/free preflight validation
+- [x] Critical OS Stop on detected heap corruption
+
 ## NexusOS 0.6.2 — Stability and Freeze Diagnostics
 
 - Software watchdog for normal-context stalls.
@@ -33,7 +59,7 @@ descent — импортированный проект принёс "archive" (
 
 ## NexusOS 0.5.2 → 0.6.0 master plan
 
-This is the active development roadmap. The current release baseline is **0.5.28 — Enstein**;
+This is the active development roadmap. The current release baseline is **0.7 — Enstein**;
 0.5.4 — Processes & Userspace Foundation is complete as a foundation milestone.
 0.5.5 — Shell & I/O Foundation is integrated.
 0.5.6 — Unified Input & USB HID is integrated.

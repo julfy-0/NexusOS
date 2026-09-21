@@ -32,6 +32,8 @@ typedef struct nexus_module_descriptor {
     uint16_t priority;
     nexus_module_init_fn init;
     nexus_module_exit_fn exit;
+    const char *const *dependencies;
+    uint16_t dependency_count;
 } nexus_module_descriptor_t;
 
 typedef struct nexus_module_runtime {
@@ -41,7 +43,7 @@ typedef struct nexus_module_runtime {
 } nexus_module_runtime_t;
 
 #define NEXUS_MODULE_SECTION __attribute__((used, section(".nexus_modules"), aligned(8)))
-#define NEXUS_MODULE(name_, version_, type_, priority_, init_, exit_) \
+#define NEXUS_MODULE_WITH_DEPS(name_, version_, type_, priority_, init_, exit_, deps_) \
     static const nexus_module_descriptor_t nexus_module_##init_ NEXUS_MODULE_SECTION = { \
         .magic = NEXUS_MODULE_MAGIC, \
         .name = (name_), \
@@ -49,7 +51,23 @@ typedef struct nexus_module_runtime {
         .type = (type_), \
         .priority = (priority_), \
         .init = (init_), \
-        .exit = (exit_) \
+        .exit = (exit_), \
+        .dependencies = (deps_), \
+        .dependency_count = (uint16_t)(sizeof(deps_) / sizeof((deps_)[0])) \
+    }
+
+#define NEXUS_MODULE(name_, version_, type_, priority_, init_, exit_) \
+    static const char *const nexus_module_deps_##init_[] = { 0 }; \
+    static const nexus_module_descriptor_t nexus_module_##init_ NEXUS_MODULE_SECTION = { \
+        .magic = NEXUS_MODULE_MAGIC, \
+        .name = (name_), \
+        .version = (version_), \
+        .type = (type_), \
+        .priority = (priority_), \
+        .init = (init_), \
+        .exit = (exit_), \
+        .dependencies = nexus_module_deps_##init_, \
+        .dependency_count = 0 \
     }
 
 void module_manager_init(void);
@@ -60,5 +78,7 @@ const nexus_module_runtime_t *module_find(const char *name);
 int module_count(void);
 int module_loaded_count(void);
 int module_failed_count(void);
+int module_dependency_count(const char *name);
+int module_dependency_failed(const char *name);
 
 #endif

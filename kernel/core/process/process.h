@@ -2,6 +2,7 @@
 #define NEXUSOS_PROCESS_H
 
 #include <stdint.h>
+#include "capability.h"
 
 #define PROCESS_MAX_COUNT 8
 #define PROCESS_INVALID_PID 0ULL
@@ -18,6 +19,7 @@
 #define PROCESS_ENV_COUNT 8
 #define PROCESS_ENV_KEY_LEN 24
 #define PROCESS_ENV_VALUE_LEN 64
+#define PROCESS_MAX_CHANNELS 8
 
 typedef enum {
     PROCESS_FD_UNUSED = 0,
@@ -45,6 +47,7 @@ typedef enum {
 
 typedef struct nexus_process {
     uint64_t pid, parent_pid, address_space_cr3;
+    nexus_capability_mask_t capabilities;
     uint64_t start_tick;
     uint64_t cpu_ticks;
     uint64_t heap_base;
@@ -62,6 +65,7 @@ typedef struct nexus_process {
     uint64_t kernel_stack;
     uint64_t scheduler_thread_id;
     process_fd_t fds[PROCESS_MAX_FDS];
+    uint32_t ipc_handles[PROCESS_MAX_CHANNELS];
     uint64_t exit_code;
     uint32_t exit_reason;
     process_state_t state;
@@ -92,6 +96,10 @@ int process_fd_tell(uint64_t pid, uint64_t fd, uint64_t *out_offset);
 int process_set_name(uint64_t pid, const char *name);
 int process_get_name(uint64_t pid, char *out, uint64_t size);
 int process_set_priority(uint64_t pid, uint32_t priority);
+int process_has_capability(uint64_t pid, uint64_t capability);
+nexus_capability_mask_t process_get_capabilities(uint64_t pid);
+int process_drop_capability(uint64_t pid, uint64_t capability);
+int process_grant_capability(uint64_t pid, uint64_t capability);
 uint32_t process_get_priority(uint64_t pid);
 int process_set_env(uint64_t pid, const char *key, const char *value);
 int process_unset_env(uint64_t pid, const char *key);
@@ -99,6 +107,7 @@ int process_get_env(uint64_t pid, const char *key, char *out, uint64_t size);
 int process_get_cwd(uint64_t pid, char *out, uint64_t size);
 int process_set_cwd(uint64_t pid, const char *cwd);
 void process_account_cpu_tick(uint64_t pid);
+void process_ipc_reset_handles(uint64_t pid);
 uint64_t process_cpu_ticks(uint64_t pid);
 uint64_t process_start_tick(uint64_t pid);
 int process_user_range_valid(uint64_t pid, uint64_t virtual_address, uint64_t size, uint64_t required_flags);

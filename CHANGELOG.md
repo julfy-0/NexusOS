@@ -1,3 +1,107 @@
+## NexusOS 0.7 — Build 002 — Native Capability Foundation
+
+### Added
+- Native per-process capability bitmap.
+- Capability inheritance when creating child processes.
+- Stable capability names for diagnostics and future policy tooling.
+- Append-only `GETCAPS`, `HAS_CAP` and `DROP_CAP` syscalls.
+- Userspace Nexus Runtime capability wrappers.
+
+### Security
+- Filesystem read/write, process spawning/control, memory mapping, Nexus Runtime and Nexus IPC syscall families are capability-gated.
+- Capability granting remains kernel-owned.
+- A userspace process may voluntarily drop a capability, but cannot grant itself a new one.
+
+### Notes
+- Public version remains **NexusOS 0.7**.
+- Internal development build: **Build 002**.
+- Existing default userspace capabilities preserve current 0.7 functionality while establishing the native security boundary for future restricted applications.
+
+## NexusOS 0.7 — Service and IPC Dependency Manager
+
+### Added
+- Native dependency metadata for built-in Nexus services and drivers.
+- Recursive dependency resolution before module initialization.
+- Dependency-cycle and missing-dependency detection.
+- Dependency state inspection APIs for diagnostics.
+
+### Runtime
+- The `runtime` service now declares an explicit dependency on `ipc`.
+- Service startup no longer depends only on numeric module priority.
+
+### Notes
+- Public versioning uses `0.7`; internal development builds may use separate Build numbers.
+- Existing Nexus Channel IPC, private CR3 isolation, watchdog and Critical OS Stop paths are preserved.
+
+## NexusOS 0.7 — Native Runtime Context
+
+### Userspace
+- Added `nexus_runtime_context_t` for reusable Native Runtime state.
+- Added runtime context open and refresh operations.
+- Added process, address-space, ABI, channel-limit and message-limit accessors.
+- Added multi-bit runtime feature checks.
+- Added a dedicated `make user-runtime` build target.
+
+### ABI
+- Existing syscall numbers are unchanged.
+- Runtime ABI version remains `1`.
+- The new API is a userspace convenience layer over the existing runtime information syscall.
+
+### Stability
+- Failed runtime queries invalidate the context instead of exposing partially populated state.
+- No kernel IRQ path or scheduler path was changed.
+
+### Notes
+- This is an incremental 0.7 userspace runtime expansion; it does not claim completion of the full 700+ feature / 2000+ fix development target.
+
+## NexusOS 0.7 — Native Userspace Runtime Foundation
+
+### Stability
+- Commands are now deferred out of the keyboard/xHCI input event-drain path, preventing command execution from blocking input processing.
+
+### Added
+- Public, append-only Nexus syscall ABI header.
+- Nexus Runtime ABI and runtime feature descriptor.
+- Built-in `ipc` and `runtime` service modules.
+- Per-process Nexus Channel handles.
+- Fixed-size cross-process IPC channels.
+- Bounded 256-byte messages with deterministic queue depth.
+- Runtime information syscall and userspace runtime wrapper library.
+- Channel create, close, send, receive and poll syscalls.
+
+### Userspace
+- Added the first native Nexus Runtime boundary for Ring-3 applications.
+- Applications can discover their runtime ABI, process identity and address-space contract.
+- Applications can communicate through Nexus Channels without depending on Unix pipe semantics.
+
+### Process
+- IPC endpoints are cleaned up when a process terminates.
+- Per-process channel ownership is cleared during safe reaping.
+
+### Stability
+- Existing private CR3 isolation, syscall validation, watchdog and Critical OS Stop paths are preserved.
+
+### Notes
+- 0.7 begins the Nexus Native Architecture milestone.
+- Linux userland concepts are not used as the primary userspace abstraction.
+
+## NexusOS 0.6.6 — Kernel Heap Integrity and Stability
+
+### Added
+- Kernel heap integrity validation.
+- Heap metadata consistency checks.
+- Heap corruption counter for diagnostics.
+
+### Stability
+- Heap validation runs during normal kernel execution.
+- Heap allocation/free paths validate allocator metadata before mutation.
+- Detected kernel heap corruption escalates to Critical OS Stop instead of continuing with potentially corrupted state.
+
+### Notes
+- NexusOS 0.6.5 version consistency work is preserved.
+- Scheduler watchdog and freeze diagnostics remain enabled.
+- The 0.6.x line remains focused on stability and hardening before the 0.7 feature program.
+
 ## NexusOS 0.6.5 — QEMU Window Compatibility
 
 ### Changed
@@ -28,7 +132,7 @@
 
 ### Notes
 - NexusOS version is now **0.6.5 - Enstein**.
-- The 0.6.x line remains focused on stability, diagnostics and platform hardening before the 0.7.x feature program.
+- The 0.6.x line remains focused on stability, diagnostics and platform hardening before the 0.7 feature program.
 
 ## NexusOS 0.6.4 — Scheduler Introspection Syscalls
 
@@ -55,7 +159,7 @@
 ### Notes
 - Stability and freeze diagnostics from NexusOS 0.6.1 are preserved.
 - Expanded syscall ABI from NexusOS 0.6.2 and 0.6.3 is preserved.
-- The 0.6.x line remains focused on stability, observability and hardware compatibility before the 0.7.x feature program.
+- The 0.6.x line remains focused on stability, observability and hardware compatibility before the 0.7 feature program.
 
 ## NexusOS 0.6.3 — Expanded System Introspection Syscalls
 
@@ -85,7 +189,7 @@
 ### Notes
 - Stability and freeze diagnostics from NexusOS 0.6.1 are preserved.
 - Expanded syscall ABI from NexusOS 0.6.2 is preserved.
-- The 0.6.x line remains focused on stability and platform hardening before the 0.7.x feature program.
+- The 0.6.x line remains focused on stability and platform hardening before the 0.7 feature program.
 
 ## NexusOS 0.6.2 — Expanded Userspace Syscall ABI
 
@@ -116,7 +220,7 @@
 ### Notes
 - Stability work from NexusOS 0.6.1 is preserved.
 - Existing syscall validation, private CR3 isolation and safe process reaping are preserved.
-- The 0.6.x line remains focused on stability and platform hardening before the 0.7.x feature program.
+- The 0.6.x line remains focused on stability and platform hardening before the 0.7 feature program.
 
 ## NexusOS 0.6.2 — Stability and Freeze Diagnostics
 
@@ -136,7 +240,7 @@
 
 ### Notes
 - NexusOS 0.6.0 userspace and build-system work is preserved.
-- This release focuses on stability before the larger 0.7.x feature program.
+- This release focuses on stability before the larger 0.7 feature program.
 
 ## NexusOS 0.6.0 — Critical OS Stop
 

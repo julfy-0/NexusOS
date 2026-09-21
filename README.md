@@ -4,9 +4,9 @@ NexusOS is a freestanding x86_64 operating-system project built around a UEFI bo
 
 ## Current release
 
-**NexusOS 0.6.5 — Enstein**
+**NexusOS 0.7 — Enstein**
 
-The current milestone is the **NexusOS 0.6.5 Scheduler Introspection**. This release expands the userspace ABI with process, environment, timing, descriptor and memory-information system calls while preserving the 0.6.x stability work.
+The current milestone is **NexusOS 0.7 — Native Userspace Runtime**. This release begins the Nexus Native Architecture with a public syscall ABI, Nexus Runtime service, and cross-process Nexus Channel IPC while preserving the 0.6.x stability work.
 
 ## Build
 
@@ -18,7 +18,7 @@ make -j2 iso
 make check
 ```
 
-The bootable ISO is produced at `build/NexusOS-0.6.5.iso`.
+The bootable ISO is produced at `build/NexusOS-0.7.iso`.
 
 For a standalone ISO from an already-built tree:
 
@@ -28,12 +28,14 @@ For a standalone ISO from an already-built tree:
 
 ## Project documentation
 
-See `docs/` for architecture, building, networking, shell I/O, filesystem, release, roadmap and the current 0.6.0 implementation set.
+See `docs/` for architecture, building, networking, shell I/O, filesystem, release, roadmap and the 0.7 native runtime foundation.
+
+The Native Runtime userspace library also provides `runtime_context.h`/`runtime_context.c` for reusable runtime state snapshots. Build it with `make user-runtime`.
 
 
-### NexusOS 0.6.5
+### NexusOS 0.7
 
-The 0.6.0 integration milestone is tracked in `docs/0.6.0_PLAN.md` with a 128+ feature target and 200 hardening/fix target.
+The 0.7 line begins the Nexus Native Architecture. The 0.6.x line is treated as the stability foundation.
 
 System font assets: `assets/fonts/Roboto-Regular.ttf` and `assets/fonts/Roboto-Bold.ttf`.
 

@@ -2,7 +2,7 @@
 from pathlib import Path
 import re
 
-expected = "0.6.5"
+expected = "0.7"
 checks = {
     "include/nexus/nexus_version.h": r'#define NEXUS_VERSION_STRING "([^"]+)"',
     "Makefile": r'^NEXUS_VERSION \?= (\S+)',
